@@ -220,9 +220,9 @@ This paper uses the conservative unsupervised setting; Eq.~\ref{eq:future_object
 
 \subsection{Why Not Other Decompositions?}
 
-The decomposition stage is not restricted to CP. A complete system could use PCA, SVD, matrix NMF, Tucker decomposition, ICA, sparse coding, or a learned autoencoder. We choose CP for this version because it gives the best trade-off among interpretability, compactness, and deployability.
+The decomposition stage is not restricted to CP. A complete system could use PCA, SVD, matrix NMF, Tucker decomposition, ICA, sparse coding, or a learned autoencoder. We choose CP for this version because it gives the best trade-off among downstream accuracy, modal interpretability, compactness, and deployability.
 
-PCA/SVD are fast and stable, but the resulting factors can be negative and are harder to map back to physical wireless energy. Matrix NMF keeps non-negativity, but it must flatten $X$ into a matrix; after flattening, link, subcarrier, and packet axes are mixed. Tucker decomposition is more expressive, but the core tensor creates interactions that are harder to explain and heavier to deploy. Autoencoders can learn powerful features, but they move the decomposition back into a black-box neural model, weakening the main claim of the paper. CP is not the only possible decomposition, but it is the cleanest first system point: it preserves all three CSI modes, produces compact factors, and keeps the representation inspectable.
+PCA/SVD are fast and stable, but the resulting factors can be negative and are harder to map back to physical wireless energy. Matrix NMF keeps non-negativity, but it must flatten $X$ into a matrix; after flattening, link, subcarrier, and packet axes are mixed. Tucker decomposition is more expressive, but the core tensor creates interactions that are harder to explain and heavier to deploy. Autoencoders can learn powerful features, but they move the decomposition back into a black-box neural model, weakening the main claim of the paper. CP is not the only possible decomposition, and PCA can be a strong purely predictive baseline. However, CP is the cleanest system point: it preserves all three CSI modes, produces compact factors, keeps the representation inspectable, and enables component-aware fusion and hard routing.
 
 \section{Selective Component-Adaptive Fusion}
 
@@ -372,6 +372,26 @@ HPE-Li reported & 85.12 & 78.18 & 68.22 & 52.07 & -- & -- \\
 \end{table*}
 
 CP improves nonlinear predictors over raw-statistic features. CP+S-AFF is the proposed practical model: it achieves 50.80\% PCK$_{20}$ with 64.9K parameters. It improves over the original AFF by 2.16 PCK$_{20}$ points, exceeds CP+CNN and CP+ExtraTrees at the strict PCK$_{20}$ threshold, and remains much smaller than HPE-Li.
+
+\begin{table}[t]
+\centering
+\caption{Full-MM-Fi decomposition/regressor ablation. All methods use the same protocol-3 train/test split with 224,532 training frames and 48,114 test frames.}
+\label{tab:decomp_regressor}
+\begin{tabular}{lrrrr}
+\toprule
+Method & Params & MPJPE & PCK$_{30}$ & PCK$_{20}$ \\
+\midrule
+Mean pose & 0 & 0.246 & 46.92 & 27.45 \\
+PCA + MLP & 111.9K & \textbf{0.187} & \textbf{68.91} & \textbf{53.53} \\
+Matrix NMF + MLP & 111.9K & 0.257 & 50.68 & 32.85 \\
+Tucker + MLP & 220.7K & 0.198 & 65.97 & 49.64 \\
+CP + MLP & 209.2K & 0.191 & 67.99 & 52.09 \\
+CP + S-AFF & 64.9K & 0.197 & 66.90 & 50.30 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:decomp_regressor} answers why we use CP rather than only reporting CP variants. PCA+MLP is the strongest pure predictor in this ablation, but it produces an unstructured projection that does not expose link, subcarrier, and packet factors. CP+MLP is within 1.44 PCK$_{20}$ points of PCA+MLP while preserving the physical CSI modes. CP+S-AFF gives a deployment-oriented point: under the shared ablation training protocol, it sacrifices 1.79 PCK$_{20}$ points relative to CP+MLP but reduces regressor parameters by 3.2$\times$ and preserves branch structure for selective routing. The tuned S-AFF run in Table~\ref{tab:main} reaches 50.80\% PCK$_{20}$. Matrix NMF and Tucker underperform CP under matched neural regressors. Thus, the reason to choose CP is not that it always maximizes raw accuracy; it is the best basis for an interpretable and hardware-shaped fusion architecture.
 
 \begin{figure}[t]
 \centering

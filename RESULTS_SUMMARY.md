@@ -70,7 +70,26 @@ python experiments/exp26_decomposition_feature_comparison.py
 python experiments/exp27_decomposition_regressor_ablation.py
 ```
 
-The first quick probe with Ridge showed that CP is not automatically superior under a linear regressor. The fairer ablation pairs each decomposition with a neural MLP regressor, and also includes CP + S-AFF.
+The first quick probe with Ridge showed that CP is not automatically superior under a linear regressor. The fairer ablation pairs each decomposition with a neural MLP regressor, and also includes CP + S-AFF. The latest run uses the full official MM-Fi protocol-3 split from `D:\TinySense\MM-Fi`: 224,532 training frames and 48,114 test frames.
+
+Full MM-Fi result:
+
+| Feature | Regressor | Dim | Regressor Params | MPJPE | PCK20 |
+|---|---|---:|---:|---:|---:|
+| PCA | MLP | 128 | 111.9K | 0.1872 | 53.53 |
+| Matrix NMF | MLP | 128 | 111.9K | 0.2569 | 32.85 |
+| Tucker | MLP | 553 | 220.7K | 0.1984 | 49.64 |
+| CP | MLP | 508 | 209.2K | 0.1912 | 52.09 |
+| CP | S-AFF | 508 | 64.9K | 0.1972 | 50.30 |
+
+Interpretation:
+
+- PCA + MLP is the strongest pure predictive decomposition baseline in this full ablation.
+- CP + MLP is close to PCA + MLP, trailing by 1.44 PCK20 points while preserving link/subcarrier/packet modes.
+- Matrix-NMF and Tucker are weaker than CP under matched neural regressors.
+- CP + S-AFF trades 1.79 PCK20 points relative to CP + MLP for a 3.2x smaller deployable regressor with component branches and hard-routing potential.
+- This CP + S-AFF row uses the shared ablation training protocol. The tuned main CP-variant run remains 50.80 PCK20.
+- The fair claim is not "CP always wins accuracy"; it is "CP gives the best structured basis for an interpretable, hardware-shaped fusion architecture."
 
 Controlled MM-Fi subset result with 5K train / 1K test frames:
 
@@ -82,13 +101,13 @@ Controlled MM-Fi subset result with 5K train / 1K test frames:
 | CP | MLP | 508 | 209.2K | 0.3412 | 38.64 |
 | CP | S-AFF | 508 | 64.9K | 0.3498 | 39.06 |
 
-Interpretation:
+Subset interpretation:
 
 - CP is the strongest decomposition family among PCA, matrix-NMF, Tucker, and CP when each gets an MLP regressor.
 - CP + S-AFF gives the best PCK20 on this subset while using about 3.2x fewer regressor parameters than CP + MLP.
 - CP + MLP has slightly lower MPJPE than CP + S-AFF on this small subset, so the full-data result remains important.
-- The full MM-Fi CP + S-AFF result is still 50.80 PCK20; this 5K/1K table is an ablation, not the final headline accuracy.
-- The fair conclusion is that CP gives the best factorization basis, and S-AFF gives a much lighter component-aware regressor that preserves/improves PCK20.
+- The full MM-Fi CP + S-AFF result is still 50.80 PCK20 in the main CP variant table; this 5K/1K table is an ablation, not the final headline accuracy.
+- After the full decomposition ablation, the claim should be refined: CP is not the top pure predictor against PCA, but it is the strongest structured factorization for S-AFF and deployment.
 
 ## 3. Python Thread Parallelism
 

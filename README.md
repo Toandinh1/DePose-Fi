@@ -252,14 +252,24 @@ Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 1
 
 ### Decomposition Feature Comparison
 
-This compares PCA, matrix-NMF, Tucker, and CP features on the same MM-Fi subset using matched regressors.
+This compares PCA, matrix-NMF, Tucker, and CP features using matched neural regressors. The full run uses the official MM-Fi protocol-3 split from `D:\TinySense\MM-Fi`.
 
 ```bash
 python experiments/exp26_decomposition_feature_comparison.py
 python experiments/exp27_decomposition_regressor_ablation.py
 ```
 
-Current result on 5K train / 1K test frames: CP is the strongest decomposition basis when PCA/NMF/Tucker/CP each get an MLP regressor. CP + S-AFF gives the best PCK20 with far fewer regressor parameters than CP + MLP.
+Current full-MM-Fi result:
+
+| Feature | Regressor | Params | MPJPE | PCK20 |
+|---|---|---:|---:|---:|
+| PCA | MLP | 111.9K | 0.1872 | 53.53 |
+| Matrix-NMF | MLP | 111.9K | 0.2569 | 32.85 |
+| Tucker | MLP | 220.7K | 0.1984 | 49.64 |
+| CP | MLP | 209.2K | 0.1912 | 52.09 |
+| CP | S-AFF | 64.9K | 0.1972 | 50.30 |
+
+Takeaway: PCA + MLP is the strongest pure predictive baseline, but CP + MLP is close while preserving link/subcarrier/packet modes. CP + S-AFF trades some PCK for a much smaller, branch-structured, deployment-friendly regressor. This supports CP as the best structured basis for the hardware-friendly architecture, not as a universal accuracy-only winner.
 
 ## What We Tried and Learned
 

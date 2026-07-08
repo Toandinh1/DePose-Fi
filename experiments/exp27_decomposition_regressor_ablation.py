@@ -38,6 +38,7 @@ sys.path.append(str(ROOT / "src"))
 sys.path.append(str(ROOT / "experiments"))
 
 from exp06_protocol3_frame_cp_probe import (  # noqa: E402
+    cp_frame_feature,
     hpe_li_protocol3_subject_split,
     iter_available_frames,
     load_hpe_li_frame,
@@ -77,6 +78,16 @@ def tucker_features(frames, ranks, progress_every=2000):
         feats.append(tucker_frame_feature(frame, ranks))
         if i % progress_every == 0:
             print(f"tucker_features={i}/{len(frames)} elapsed={time.time() - t0:.1f}s", flush=True)
+    return np.vstack(feats)
+
+
+def cp_features_from_frames(frames, rank, iters, progress_every=2000):
+    feats = []
+    t0 = time.time()
+    for i, frame in enumerate(frames, start=1):
+        feats.append(cp_frame_feature(frame, rank=rank, iters=iters))
+        if i % progress_every == 0:
+            print(f"cp_features={i}/{len(frames)} elapsed={time.time() - t0:.1f}s", flush=True)
     return np.vstack(feats)
 
 
@@ -225,9 +236,47 @@ def run(args):
     feature_sets.append(("tucker", *standardize_xy(tucker_features(train_frames, ranks), tucker_features(test_frames, ranks))))
     print(f"built_tucker elapsed={time.time() - t0:.1f}s", flush=True)
 
-    z = np.load(args.cp_cache)
-    x_cp_train_vec = z["x_cp_train"][: len(y_train)].astype(np.float32)
-    x_cp_test_vec = z["x_cp_test"][: len(y_test)].astype(np.float32)
+    x_cp_train_vec = None
+    x_cp_test_vec = None
+    if args.cp_source in ("auto", "cache") and args.cp_cache.exists():
+        z = np.load(args.cp_cache)
+        cache_ok = (
+            "x_cp_train" in z
+            and "x_cp_test" in z
+            and len(z["x_cp_train"]) == len(y_train)
+            and len(z["x_cp_test"]) == len(y_test)
+        )
+        if cache_ok:
+            print(f"using_cp_cache={args.cp_cache}", flush=True)
+            x_cp_train_vec = z["x_cp_train"].astype(np.float32)
+            x_cp_test_vec = z["x_cp_test"].astype(np.float32)
+        else:
+            msg = (
+                f"cp_cache_mismatch cache_train={len(z['x_cp_train']) if 'x_cp_train' in z else 'NA'} "
+                f"cache_test={len(z['x_cp_test']) if 'x_cp_test' in z else 'NA'} "
+                f"current_train={len(y_train)} current_test={len(y_test)}"
+            )
+            if args.cp_source == "cache":
+                raise ValueError(msg)
+            print(msg, flush=True)
+            print("computing_cp_from_current_raw_frames", flush=True)
+    if x_cp_train_vec is None or x_cp_test_vec is None:
+        if args.cp_source == "cache":
+            raise ValueError(f"CP cache unavailable or incompatible: {args.cp_cache}")
+        x_cp_train_vec = cp_features_from_frames(train_frames, args.cp_rank, args.cp_iters)
+        x_cp_test_vec = cp_features_from_frames(test_frames, args.cp_rank, args.cp_iters)
+        if args.computed_cp_cache is not None:
+            args.computed_cp_cache.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                args.computed_cp_cache,
+                x_cp_train=x_cp_train_vec,
+                x_cp_test=x_cp_test_vec,
+                y_train=y_train,
+                y_test=y_test,
+                cp_rank=args.cp_rank,
+                cp_iters=args.cp_iters,
+            )
+            print(f"saved_computed_cp_cache={args.computed_cp_cache}", flush=True)
     feature_sets.append(("cp", *standardize_xy(x_cp_train_vec, x_cp_test_vec)))
 
     for name, xtr, xte in feature_sets:
@@ -263,6 +312,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", type=Path, default=ROOT / "data" / "MMFi_full" / "extracted")
     parser.add_argument("--cp-cache", type=Path, default=ROOT / "outputs" / "protocol3_frame_cp_probe_full_cp10.npz")
+    parser.add_argument("--cp-source", choices=["auto", "cache", "compute"], default="auto")
+    parser.add_argument("--computed-cp-cache", type=Path, default=None)
+    parser.add_argument("--cp-rank", type=int, default=4)
+    parser.add_argument("--cp-iters", type=int, default=35)
     parser.add_argument("--output", type=Path, default=ROOT / "outputs" / "decomposition_regressor_ablation.csv")
     parser.add_argument("--max-train", type=int, default=5000)
     parser.add_argument("--max-test", type=int, default=1000)
