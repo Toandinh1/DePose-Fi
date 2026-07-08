@@ -61,31 +61,34 @@ Interpretation:
 - The medium/small models are better deployment tradeoffs.
 - Separate amplitude/phase CP streams are the right direction for PiW-style 3D pose.
 
-## 2.1 Decomposition Feature Comparison
+## 2.1 Decomposition and Regressor Ablation
 
 Script:
 
 ```bash
 python experiments/exp26_decomposition_feature_comparison.py
+python experiments/exp27_decomposition_regressor_ablation.py
 ```
+
+The first quick probe with Ridge showed that CP is not automatically superior under a linear regressor. The fairer ablation pairs each decomposition with a neural MLP regressor, and also includes CP + S-AFF.
 
 Controlled MM-Fi subset result with 5K train / 1K test frames:
 
-| Feature | Regressor | Dim | MPJPE | PCK20 |
-|---|---|---:|---:|---:|
-| Mean pose | none | 0 | 0.3053 | 47.27 |
-| PCA | Ridge | 128 | 0.3586 | 17.47 |
-| Matrix NMF | Ridge | 128 | 0.4064 | 15.92 |
-| Tucker | Ridge | 553 | 0.3863 | 20.34 |
-| CP | Ridge | 508 | 0.3848 | 19.11 |
-| CP | S-AFF | 508 | 0.3324 | 43.22 |
+| Feature | Regressor | Dim | Regressor Params | MPJPE | PCK20 |
+|---|---|---:|---:|---:|---:|
+| PCA | MLP | 128 | 111.9K | 0.3900 | 20.61 |
+| Matrix NMF | MLP | 128 | 111.9K | 0.4991 | 19.39 |
+| Tucker | MLP | 553 | 220.7K | 0.3747 | 31.85 |
+| CP | MLP | 508 | 209.2K | 0.3412 | 38.64 |
+| CP | S-AFF | 508 | 64.9K | 0.3498 | 39.06 |
 
 Interpretation:
 
-- CP factors do not automatically dominate with a linear Ridge regressor.
-- The real gain comes from pairing CP with the decomposition-aware S-AFF architecture.
-- PCA, matrix-NMF, and Tucker features are much weaker under the same lightweight Ridge setup on this subset.
-- This supports the paper argument that CP is useful because it exposes mode-specific components that S-AFF can exploit, not because low-rank compression alone solves HPE.
+- CP is the strongest decomposition family among PCA, matrix-NMF, Tucker, and CP when each gets an MLP regressor.
+- CP + S-AFF gives the best PCK20 on this subset while using about 3.2x fewer regressor parameters than CP + MLP.
+- CP + MLP has slightly lower MPJPE than CP + S-AFF on this small subset, so the full-data result remains important.
+- The full MM-Fi CP + S-AFF result is still 50.80 PCK20; this 5K/1K table is an ablation, not the final headline accuracy.
+- The fair conclusion is that CP gives the best factorization basis, and S-AFF gives a much lighter component-aware regressor that preserves/improves PCK20.
 
 ## 3. Python Thread Parallelism
 

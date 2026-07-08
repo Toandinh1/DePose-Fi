@@ -1,0 +1,7 @@
+method,feature_dim,regressor,regressor_params,train_samples,test_samples,mpjpe,pck20,pck30,pck50,notes
+mean_pose,0,none,0,5000,1000,0.305295,47.2706,71.7824,85.9353,subset baseline; not a learned sensing model
+pca_128,128,MLP,111923,5000,1000,0.390017,20.6118,36.3059,61.9647,global PCA features with MLP
+matrix_nmf_128,128,MLP,111923,5000,1000,0.499076,19.3882,32.5000,53.1529,global matrix-NMF features with MLP
+tucker_3_4_4,553,MLP,220723,5000,1000,0.374692,31.8529,49.6235,71.1000,Tucker/HOSVD features with MLP
+cp_rank4,508,MLP,209203,5000,1000,0.341213,38.6412,58.8765,79.3647,CP features with generic MLP
+cp_rank4,508,S-AFF,64884,5000,1000,0.349811,39.0588,59.7000,82.1294,CP features with component-aware S-AFF

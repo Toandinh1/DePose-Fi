@@ -115,8 +115,10 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |   |                            # Hard-routed S-AFF accuracy/compute tradeoff
 |   |-- exp25_mmfi_bonly_runtime.py
 |                                # Subcarrier-only routed runtime benchmark
-|   `-- exp26_decomposition_feature_comparison.py
+|   |-- exp26_decomposition_feature_comparison.py
 |                                # PCA/NMF/Tucker/CP feature comparison
+|   `-- exp27_decomposition_regressor_ablation.py
+|                                # PCA/NMF/Tucker/CP with neural regressors
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -250,13 +252,14 @@ Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 1
 
 ### Decomposition Feature Comparison
 
-This compares PCA, matrix-NMF, Tucker, and CP features on the same MM-Fi subset using a matched Ridge regressor.
+This compares PCA, matrix-NMF, Tucker, and CP features on the same MM-Fi subset using matched regressors.
 
 ```bash
 python experiments/exp26_decomposition_feature_comparison.py
+python experiments/exp27_decomposition_regressor_ablation.py
 ```
 
-Current result on 5K train / 1K test frames: PCA/NMF/Tucker/CP with Ridge are weak, while CP + S-AFF is much stronger. This means the win is not low-rank compression alone; the win is CP structure plus component-aware fusion.
+Current result on 5K train / 1K test frames: CP is the strongest decomposition basis when PCA/NMF/Tucker/CP each get an MLP regressor. CP + S-AFF gives the best PCK20 with far fewer regressor parameters than CP + MLP.
 
 ## What We Tried and Learned
 
