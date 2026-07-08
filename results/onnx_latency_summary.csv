@@ -1,0 +1,4 @@
+model_size,params,torch_sequential_us,onnx_full_us,onnx_split_sequential_us,onnx_split_stream_parallel_us,best_onnx_speedup_vs_torch
+small,131401,969.11,121.62,143.02,199.16,7.97
+medium,462249,999.38,178.66,208.25,263.32,5.59
+large,1437257,1272.71,288.94,372.33,392.30,4.41

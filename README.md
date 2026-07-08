@@ -25,6 +25,12 @@ Our main pipeline is:
 
 The strongest result is on **MM-Fi**, where the decomposition + S-AFF design gives a much smaller model while staying close to a strong Wi-Fi HPE baseline.
 
+For a compact stakeholder-facing summary of current outcomes, see:
+
+```text
+RESULTS_SUMMARY.md
+```
+
 Current headline result:
 
 | Dataset / Setting | Method | Accuracy | Params | FLOPs |
