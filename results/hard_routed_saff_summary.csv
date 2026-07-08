@@ -1,0 +1,3 @@
+mode,pck20,mpjpe,avg_executed_experts,expert_compute_fraction,estimated_expert_speedup,gate_choice_b_pct,best_onnx_latency_us,notes
+full_soft,48.2518,0.201738,4,1.0,1.0,100.0,86.77,full S-AFF trained with gate sharpening
+top1_subcarrier,48.2517,0.201738,1,0.25,4.0,100.0,54.18,hard-routed subcarrier-only deployment

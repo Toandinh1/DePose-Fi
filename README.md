@@ -109,8 +109,12 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |                                # ONNX Runtime deployment and split-stream benchmark
 |   |-- exp22_hpe_li_runtime.py
 |   |                            # HPE-Li PyTorch/ONNX runtime benchmark
-|   `-- exp23_mmfi_saff_runtime.py
+|   |-- exp23_mmfi_saff_runtime.py
 |                                # MM-Fi CP + S-AFF PyTorch/ONNX runtime benchmark
+|   |-- exp24_hard_routed_saff.py
+|   |                            # Hard-routed S-AFF accuracy/compute tradeoff
+|   `-- exp25_mmfi_bonly_runtime.py
+|                                # Subcarrier-only routed runtime benchmark
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -230,6 +234,17 @@ python experiments/exp23_mmfi_saff_runtime.py
 ```
 
 Current result: CP + S-AFF is about 70x faster than HPE-Li in PyTorch CPU inference and about 83x faster in ONNX Runtime CPU inference on this laptop benchmark.
+
+### Hard-Routed S-AFF Deployment
+
+This tests whether the learned S-AFF gate can become a deployment-time routing policy.
+
+```bash
+python experiments/exp24_hard_routed_saff.py
+python experiments/exp25_mmfi_bonly_runtime.py
+```
+
+Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 100% of test frames. Top-1 routed inference preserves the full model's PCK20 in this run while reducing ONNX latency from 86.77 us to 54.18 us.
 
 ## What We Tried and Learned
 

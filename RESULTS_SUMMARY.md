@@ -109,6 +109,41 @@ Compared with HPE-Li, the MM-Fi CP + S-AFF ONNX model is much faster:
 | HPE-Li DSKNetTrans-MMFI | 7242.15 us |
 | CP + S-AFF | 86.77 us |
 
+## 4.1 Hard-Routed S-AFF Deployment
+
+Scripts:
+
+```bash
+python experiments/exp24_hard_routed_saff.py
+python experiments/exp25_mmfi_bonly_runtime.py
+```
+
+The trained S-AFF gate becomes extremely sharp on MM-Fi:
+
+| Statistic | Value |
+|---|---:|
+| Gate max mean | 0.999999 |
+| Gate entropy | 0.000010 |
+| Subcarrier expert selected | 100.0% |
+
+This enables a hard-routed deployment mode: execute only the subcarrier branch instead of all four S-AFF experts.
+
+| Mode | PCK20 | MPJPE | Executed Experts | ONNX Latency |
+|---|---:|---:|---:|---:|
+| Full soft S-AFF | 48.2518 | 0.201738 | 4 / 4 | 86.77 us |
+| Top-1 subcarrier routed | 48.2517 | 0.201738 | 1 / 4 | 54.18 us |
+
+Interpretation:
+
+- Hard routing preserves the trained full model's accuracy in this run.
+- It reduces expert execution from four branches to one branch.
+- It gives about 1.6x measured ONNX latency reduction over full S-AFF.
+- Compared with HPE-Li ONNX, hard-routed S-AFF is about 134x faster on this laptop CPU benchmark.
+
+This gives us a concrete deployment contribution:
+
+> S-AFF is not only branch-structured; its learned sparse gate can be converted into a hard routing policy that skips inactive experts at inference time.
+
 ## 5. Current Contribution Framing
 
 Strong claims:
@@ -117,6 +152,7 @@ Strong claims:
 - S-AFF is mode-aware and interpretable because it fuses CP components rather than raw CSI.
 - S-AFF is deployment-friendly because it uses standard operators and exports cleanly to ONNX.
 - S-AFF exposes independent component streams, enabling branch-level scheduling on edge hardware.
+- Gate-sharpened S-AFF supports hard-routed inference that skips inactive experts and reduces measured ONNX latency.
 
 Claims we should avoid until we have real-device evidence:
 
