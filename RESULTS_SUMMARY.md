@@ -20,6 +20,29 @@ Interpretation:
 - It uses more than 800x fewer FLOPs.
 - This is the cleanest hardware-friendly evidence so far.
 
+## 1.1 MM-Fi Runtime Against HPE-Li
+
+Scripts:
+
+```bash
+python experiments/exp23_mmfi_saff_runtime.py
+python experiments/exp22_hpe_li_runtime.py
+```
+
+Best laptop CPU batch-1 runtime:
+
+| Model | Params | PyTorch CPU | ONNX CPU |
+|---|---:|---:|---:|
+| HPE-Li DSKNetTrans-MMFI | 2.06M | 25.48 ms | 7.24 ms |
+| CP + S-AFF | 64.9K | 0.365 ms | 0.0868 ms |
+
+Runtime interpretation:
+
+- CP + S-AFF is about 70x faster than HPE-Li in PyTorch CPU batch-1 inference.
+- CP + S-AFF is about 83x faster than HPE-Li in ONNX Runtime CPU batch-1 inference.
+- HPE-Li also benefits from ONNX, but its selective-kernel/transformer-style backbone remains much slower.
+- This is a strong deployment argument: our model is not merely smaller on paper; it is substantially faster under the same CPU runtime family.
+
 ## 2. Person-in-WiFi 3D Adaptation
 
 Person-in-WiFi 3D is a harder 3D multi-person setting. The important lesson is that amplitude and phase should be decomposed with separate CP streams.
@@ -79,6 +102,13 @@ Interpretation:
 - Monolithic ONNX is currently fastest on laptop CPU.
 - Split execution is still useful as evidence that the architecture supports hardware scheduling flexibility.
 
+Compared with HPE-Li, the MM-Fi CP + S-AFF ONNX model is much faster:
+
+| Model | Best ONNX CPU Latency |
+|---|---:|
+| HPE-Li DSKNetTrans-MMFI | 7242.15 us |
+| CP + S-AFF | 86.77 us |
+
 ## 5. Current Contribution Framing
 
 Strong claims:
@@ -101,4 +131,3 @@ Claims we should avoid until we have real-device evidence:
 3. Implement hard-routing S-AFF to skip inactive branches.
 4. Train full mixed-person dual amplitude/phase CP + S-AFF on Person-in-WiFi 3D.
 5. Add energy/FPS/memory reporting for real edge hardware.
-

@@ -1,0 +1,3 @@
+model,params,pytorch_cpu_us,onnx_cpu_us,notes
+HPE-Li DSKNetTrans-MMFI,2056514,25479.08,7242.15,batch-1 CPU; official local HPE-Li model definition
+CP + S-AFF,64884,364.56,86.77,batch-1 CPU; MM-Fi CP factor input

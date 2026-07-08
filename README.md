@@ -105,8 +105,12 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |   |                            # Dual amplitude/phase CP streams for PiW
 |   |-- exp20_saff_parallel_inference.py
 |                                # S-AFF branch/stream parallel inference benchmark
-|   `-- exp21_saff_onnx_parallel.py
+|   |-- exp21_saff_onnx_parallel.py
 |                                # ONNX Runtime deployment and split-stream benchmark
+|   |-- exp22_hpe_li_runtime.py
+|   |                            # HPE-Li PyTorch/ONNX runtime benchmark
+|   `-- exp23_mmfi_saff_runtime.py
+|                                # MM-Fi CP + S-AFF PyTorch/ONNX runtime benchmark
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -215,6 +219,17 @@ python experiments/exp21_saff_onnx_parallel.py \
 ```
 
 Current result: ONNX Runtime is a major deployment win, giving about 4.5x to 8x faster batch-1 inference than PyTorch on laptop CPU. Split stream execution works, but is not faster than monolithic ONNX on this CPU.
+
+### HPE-Li Runtime Comparison
+
+This compares the local HPE-Li MM-Fi model against our MM-Fi CP + S-AFF runtime.
+
+```bash
+python experiments/exp22_hpe_li_runtime.py
+python experiments/exp23_mmfi_saff_runtime.py
+```
+
+Current result: CP + S-AFF is about 70x faster than HPE-Li in PyTorch CPU inference and about 83x faster in ONNX Runtime CPU inference on this laptop benchmark.
 
 ## What We Tried and Learned
 
