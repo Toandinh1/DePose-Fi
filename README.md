@@ -1,4 +1,4 @@
-# SwiftPose-Fi / DePose-Fi
+# DePose-Fi
 
 This repository contains the research code and paper draft for a decomposition-first Wi-Fi human pose estimation project.
 
