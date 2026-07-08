@@ -88,23 +88,25 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 
 ```text
 .
-├── src/
-│   ├── cp_factorization.py      # CP decomposition helpers
-│   ├── metrics.py               # Pose metrics
-│   └── mmfi_pipeline.py         # MM-Fi dataset utilities
-├── experiments/
-│   ├── exp14_cp_cnn_aff.py      # Main MM-Fi CP + CNN/AFF/S-AFF experiment
-│   ├── exp17_piw3d_cp_saff.py   # Person-in-WiFi 3D mixed-person CP + query S-AFF
-│   ├── exp18_piw3d_temporal_cp_saff.py
-│   │                            # Temporal CP embedding experiment
-│   └── exp19_piw3d_dualcp_saff.py
-│                                # Dual amplitude/phase CP streams for PiW
-├── PAPER/
-│   ├── deposefi_systems_draft.tex
-│   └── figures/
-├── data/
-│   └── PersonInWiFi3D_README.md # Dataset layout notes only
-└── README.md
+|-- src/
+|   |-- cp_factorization.py      # CP decomposition helpers
+|   |-- metrics.py               # Pose metrics
+|   `-- mmfi_pipeline.py         # MM-Fi dataset utilities
+|-- experiments/
+|   |-- exp14_cp_cnn_aff.py      # Main MM-Fi CP + CNN/AFF/S-AFF experiment
+|   |-- exp17_piw3d_cp_saff.py   # Person-in-WiFi 3D mixed-person CP + query S-AFF
+|   |-- exp18_piw3d_temporal_cp_saff.py
+|   |                            # Temporal CP embedding experiment
+|   |-- exp19_piw3d_dualcp_saff.py
+|   |                            # Dual amplitude/phase CP streams for PiW
+|   `-- exp20_saff_parallel_inference.py
+|                                # S-AFF branch/stream parallel inference benchmark
+|-- PAPER/
+|   |-- deposefi_systems_draft.tex
+|   `-- figures/
+|-- data/
+|   `-- PersonInWiFi3D_README.md # Dataset layout notes only
+`-- README.md
 ```
 
 ## Setup
@@ -177,6 +179,20 @@ python experiments/exp19_piw3d_dualcp_saff.py \
 
 This is the most important PiW direction. It decomposes amplitude and phase separately, then fuses them.
 
+### S-AFF Parallel Inference Benchmark
+
+This checks whether branch-level parallelism gives real CPU latency gains before testing real edge devices.
+
+```bash
+python experiments/exp20_saff_parallel_inference.py \
+  --model-sizes small,medium,large \
+  --torch-threads 1,2,4 \
+  --warmup 100 \
+  --iters 1000
+```
+
+Current result: Python-thread branch/stream parallelism is slower than sequential batch-1 inference. The architecture exposes parallelism, but we should not claim measured speedup until ONNX/C++/real-device tests show it.
+
 ## What We Tried and Learned
 
 ### Works Well
@@ -186,6 +202,7 @@ This is the most important PiW direction. It decomposes amplitude and phase sepa
 - Gate sharpening helps avoid uniform fusion weights.
 - Query-style heads are necessary for multi-person Person-in-WiFi 3D.
 - Separate amplitude/phase CP streams improve Person-in-WiFi 3D single-person accuracy.
+- S-AFF exposes branch-level parallelism, but the first Python-thread benchmark shows no batch-1 latency gain yet.
 
 ### Did Not Work Well Yet
 
@@ -193,6 +210,7 @@ This is the most important PiW direction. It decomposes amplitude and phase sepa
 - Simple averaging/smoothing of CP embeddings is not enough.
 - Combined amplitude+phase CP is weaker than separate amplitude/phase CP streams.
 - PiW multi-person accuracy is still not competitive with heavy SOTA models.
+- Naive Python-thread branch parallelism is slower than sequential S-AFF for batch-1 CPU inference.
 
 ## Paper Draft
 
