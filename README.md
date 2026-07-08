@@ -97,8 +97,10 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |   |                            # Temporal CP embedding experiment
 |   |-- exp19_piw3d_dualcp_saff.py
 |   |                            # Dual amplitude/phase CP streams for PiW
-|   `-- exp20_saff_parallel_inference.py
+|   |-- exp20_saff_parallel_inference.py
 |                                # S-AFF branch/stream parallel inference benchmark
+|   `-- exp21_saff_onnx_parallel.py
+|                                # ONNX Runtime deployment and split-stream benchmark
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -190,6 +192,23 @@ python experiments/exp20_saff_parallel_inference.py \
 ```
 
 Current result: Python-thread branch/stream parallelism is slower than sequential batch-1 inference. The architecture exposes parallelism, but we should not claim measured speedup until ONNX/C++/real-device tests show it.
+
+### ONNX Runtime Deployment Benchmark
+
+This exports S-AFF as both a full ONNX graph and split amplitude/phase stream ONNX graphs.
+
+```bash
+python experiments/exp21_saff_onnx_parallel.py \
+  --model-size large \
+  --warmup 100 \
+  --iters 1000 \
+  --intra-threads 1,2,4 \
+  --inter-threads 1,2 \
+  --execution-modes sequential,parallel \
+  --rebuild
+```
+
+Current result: ONNX Runtime is a major deployment win, giving about 4.5x to 8x faster batch-1 inference than PyTorch on laptop CPU. Split stream execution works, but is not faster than monolithic ONNX on this CPU.
 
 ## What We Tried and Learned
 

@@ -79,12 +79,51 @@ We do not have evidence for that yet.
 
 ## Next Validation Steps
 
-1. Install/test ONNX Runtime CPU and compare exported sequential S-AFF latency.
-2. Try a compiled backend such as TorchScript or `torch.compile` where available.
-3. Test real Raspberry Pi 5 or Jetson hardware.
-4. If using parallelism, implement it below Python level, for example:
+1. Test real Raspberry Pi 5 or Jetson hardware.
+2. Try quantized ONNX Runtime inference.
+3. If using parallelism, implement it below Python level, for example:
    - ONNX Runtime graph-level parallel execution,
    - C++ thread pool,
    - separate accelerator kernels,
    - hard-routing S-AFF that skips inactive branches.
 
+## ONNX Runtime Follow-Up
+
+Script:
+
+```bash
+python experiments/exp21_saff_onnx_parallel.py \
+  --model-size large \
+  --warmup 100 \
+  --iters 1000 \
+  --intra-threads 1,2,4 \
+  --inter-threads 1,2 \
+  --execution-modes sequential,parallel \
+  --rebuild
+```
+
+This exports:
+
+- a monolithic dual-CP S-AFF ONNX graph,
+- an amplitude encoder ONNX graph,
+- a phase encoder ONNX graph,
+- a small fusion-head ONNX graph.
+
+Best results from the laptop CPU sweep:
+
+| Model Size | PyTorch Seq. | ONNX Full | ONNX Split Seq. | ONNX Split Stream Parallel |
+|---|---:|---:|---:|---:|
+| small | 969.11 us | 121.62 us | 143.02 us | 199.16 us |
+| medium | 999.38 us | 178.66 us | 208.25 us | 263.32 us |
+| large | 1272.71 us | 288.94 us | 372.33 us | 392.30 us |
+
+Interpretation:
+
+- ONNX Runtime is a strong deployment win: about 4.5x to 8x faster than PyTorch batch-1 inference.
+- Splitting the architecture into amplitude/phase stream ONNX graphs works and remains fast.
+- On this CPU, stream-parallel ONNX is still slower than monolithic ONNX because synchronization/session overhead dominates.
+- The contribution should emphasize **deployable branch structure and scheduling flexibility**, not guaranteed CPU speedup from naive parallel execution.
+
+Updated paper-safe claim:
+
+> SwiftPose-Fi's S-AFF design can be exported either as a compact monolithic ONNX graph or as independent amplitude/phase component graphs plus a small fusion head. This demonstrates that the architecture is deployment-shaped: it uses standard runtime-supported operators and exposes branch-level scheduling choices, even though measured speedup from split parallel execution depends on the target runtime and hardware.
