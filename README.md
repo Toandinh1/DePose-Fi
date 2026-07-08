@@ -1,45 +1,232 @@
-# SwiftPose-Fi / Decomposition-Based Wi-Fi HPE
+# SwiftPose-Fi / DePose-Fi
 
-This repository contains research code and paper drafts for a decomposition-first Wi-Fi human pose estimation project.
+This repository contains the research code and paper draft for a decomposition-first Wi-Fi human pose estimation project.
 
-The main idea is to decompose Wi-Fi CSI into structured components using CP factorization, then estimate pose with a lightweight Selective Component-Adaptive Fusion (S-AFF) model.
+The current system name in the paper is **SwiftPose-Fi**. The GitHub repository name is **DePose-Fi** because the original idea started from decomposing Wi-Fi CSI before pose estimation.
 
-## Contents
+## Project Goal
 
-- `src/`: shared CP factorization, MM-Fi loading utilities, and metrics.
-- `experiments/`: experiment scripts for MM-Fi and Person-in-WiFi 3D studies.
-- `PAPER/`: LaTeX draft and generated figures.
-- `data/`: dataset notes only. Raw datasets are not included.
+Wi-Fi human pose estimation can work without cameras, but many existing methods directly feed raw channel state information (CSI) into large neural networks. That gives good accuracy, but it is difficult to deploy on small edge hardware.
 
-## Main Experiments
+This project asks a different question:
 
-MM-Fi full protocol-3 frame-level S-AFF:
+> Can we first decompose CSI into interpretable wireless components, then use a much smaller pose regressor that is easier to deploy?
+
+Our main pipeline is:
+
+1. Convert Wi-Fi CSI into a tensor.
+2. Decompose the tensor using CP factorization.
+3. Treat the CP factors as interpretable components:
+   - link / antenna-pair component,
+   - subcarrier / frequency component,
+   - packet / time component.
+4. Feed these components into **Selective Component-Adaptive Fusion (S-AFF)**.
+5. Predict human pose with a lightweight model built from standard operations.
+
+## Main Takeaway
+
+The strongest result is on **MM-Fi**, where the decomposition + S-AFF design gives a much smaller model while staying close to a strong Wi-Fi HPE baseline.
+
+Current headline result:
+
+| Dataset / Setting | Method | Accuracy | Params | FLOPs |
+|---|---:|---:|---:|---:|
+| MM-Fi protocol-3 frame-level | HPE-Li baseline | 52.07 PCK20 | 1.66M | 2.42G |
+| MM-Fi protocol-3 frame-level | CP + S-AFF | 50.80 PCK20 | 64.9K | 2.89M |
+
+So the MM-Fi story is:
+
+- only 1.27 PCK20 behind HPE-Li,
+- about 26x fewer parameters,
+- more than 800x fewer FLOPs,
+- standard operations only, which is better for edge deployment.
+
+## Why S-AFF?
+
+Plain fusion averages or concatenates all CP factors. That is weak because different frames may rely on different CSI components.
+
+S-AFF improves this by keeping branch-specific embeddings:
+
+- `h_A`: link/antenna factor embedding,
+- `h_B`: subcarrier factor embedding,
+- `h_C`: packet factor embedding,
+- `h_F`: fused embedding.
+
+The model predicts a gate over these experts and can emphasize the most useful branch for each sample. We also use a sharpening loss so the gate avoids nearly uniform weights.
+
+Important distinction:
+
+- Current S-AFF is a **soft fusion** model. It computes all branches and then weights them.
+- A future hard-routing version could compute only the selected branch to reduce real inference cost further.
+
+## Person-in-WiFi 3D Adaptation
+
+Person-in-WiFi 3D is harder than MM-Fi because it is 3D and can contain multiple people. The official format has CSI shaped as `3 x 3 x 30 x 20`, which we reshape into antenna links, subcarriers, and packets.
+
+We learned two important things:
+
+1. A fixed one-person head is not enough for multi-person data.
+2. For Person-in-WiFi 3D-style data, amplitude and phase should be decomposed with **separate CP streams** instead of being mixed into one tensor.
+
+Current single-person Person-in-WiFi 3D result:
+
+| Method | MPJPE | Params |
+|---|---:|---:|
+| WiFi-Mamba SOTA | 76.75 mm | 2.14M |
+| Our dual amplitude/phase CP + S-AFF-L | 83.82 mm | 1.70M |
+| Our dual amplitude/phase CP + S-AFF-M | 91.35 mm | 923K |
+| Our dual amplitude/phase CP + S-AFF-S | 107.53 mm | 248K |
+
+This is not yet a SOTA accuracy win. The honest interpretation is:
+
+- WiFi-Mamba is still better in accuracy.
+- Our large model is close but does not give a big parameter advantage.
+- Our medium and small variants provide better deployment tradeoffs.
+- Separate amplitude/phase CP streams are the right direction for improving the PiW setting.
+
+## Repository Structure
+
+```text
+.
+├── src/
+│   ├── cp_factorization.py      # CP decomposition helpers
+│   ├── metrics.py               # Pose metrics
+│   └── mmfi_pipeline.py         # MM-Fi dataset utilities
+├── experiments/
+│   ├── exp14_cp_cnn_aff.py      # Main MM-Fi CP + CNN/AFF/S-AFF experiment
+│   ├── exp17_piw3d_cp_saff.py   # Person-in-WiFi 3D mixed-person CP + query S-AFF
+│   ├── exp18_piw3d_temporal_cp_saff.py
+│   │                            # Temporal CP embedding experiment
+│   └── exp19_piw3d_dualcp_saff.py
+│                                # Dual amplitude/phase CP streams for PiW
+├── PAPER/
+│   ├── deposefi_systems_draft.tex
+│   └── figures/
+├── data/
+│   └── PersonInWiFi3D_README.md # Dataset layout notes only
+└── README.md
+```
+
+## Setup
+
+Create a Python environment, then install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+The code expects common scientific Python packages:
+
+- `numpy`
+- `scipy`
+- `scikit-learn`
+- `torch`
+- `h5py`
+- `matplotlib`
+
+## Datasets
+
+Raw datasets are not committed to GitHub.
+
+Expected local paths:
+
+```text
+data/MMFi_full/
+data/PersonInWiFi3D/
+```
+
+You can also pass a custom Person-in-WiFi 3D path:
+
+```bash
+python experiments/exp17_piw3d_cp_saff.py --data-root /path/to/PiW_dataset
+```
+
+For Person-in-WiFi 3D, see:
+
+```text
+data/PersonInWiFi3D_README.md
+```
+
+## Reproducing Main Experiments
+
+### MM-Fi: CP + S-AFF
+
+This is the main lightweight deployment result.
 
 ```bash
 python experiments/exp14_cp_cnn_aff.py
 ```
 
-Person-in-WiFi 3D mixed-person CP + query S-AFF:
+This script compares CP-based regressors, including CNN, AFF, and S-AFF.
+
+### Person-in-WiFi 3D: Mixed-Person Query S-AFF
 
 ```bash
-python experiments/exp17_piw3d_cp_saff.py --data-root D:/TinySense/PiW_dataset
+python experiments/exp17_piw3d_cp_saff.py \
+  --data-root data/PersonInWiFi3D
 ```
 
-Person-in-WiFi 3D single-person dual amplitude/phase CP streams:
+This version handles variable-person labels with a query-style pose head and matching-based evaluation.
+
+### Person-in-WiFi 3D: Dual Amplitude/Phase CP Streams
 
 ```bash
-python experiments/exp19_piw3d_dualcp_saff.py --data-root D:/TinySense/PiW_dataset
+python experiments/exp19_piw3d_dualcp_saff.py \
+  --data-root data/PersonInWiFi3D
 ```
 
-## Data
+This is the most important PiW direction. It decomposes amplitude and phase separately, then fuses them.
 
-Datasets are intentionally not committed.
+## What We Tried and Learned
 
-- MM-Fi should be placed under `data/MMFi_full/`.
-- Person-in-WiFi 3D should be placed locally and passed with `--data-root`, for example `D:/TinySense/PiW_dataset`.
+### Works Well
 
-See `data/PersonInWiFi3D_README.md` for the expected Person-in-WiFi 3D layout.
+- CP decomposition gives compact and interpretable CSI components.
+- S-AFF improves over plain AFF on MM-Fi.
+- Gate sharpening helps avoid uniform fusion weights.
+- Query-style heads are necessary for multi-person Person-in-WiFi 3D.
+- Separate amplitude/phase CP streams improve Person-in-WiFi 3D single-person accuracy.
 
-## Notes
+### Did Not Work Well Yet
 
-Generated feature caches, trained checkpoints, external cloned repositories, and reference PDFs are excluded from Git to keep the repository lightweight and shareable.
+- Naive temporal modeling over CP vectors hurt PiW performance.
+- Simple averaging/smoothing of CP embeddings is not enough.
+- Combined amplitude+phase CP is weaker than separate amplitude/phase CP streams.
+- PiW multi-person accuracy is still not competitive with heavy SOTA models.
+
+## Paper Draft
+
+Main draft:
+
+```text
+PAPER/deposefi_systems_draft.tex
+```
+
+Current framing:
+
+- MM-Fi is the main hardware-friendly result.
+- Person-in-WiFi 3D is a generalization/stress-test setting.
+- We should not claim SOTA on PiW yet.
+- The PiW lesson is that separate amplitude/phase CP streams are required for stronger 3D performance.
+
+## Git Hygiene
+
+Do not commit:
+
+- raw datasets,
+- cached `.npz` features,
+- trained checkpoints,
+- external cloned repositories,
+- reference PDFs,
+- local absolute paths,
+- API keys or tokens.
+
+These are excluded by `.gitignore`.
+
+## Suggested Next Steps
+
+1. Run real edge-device latency tests on Raspberry Pi or Jetson.
+2. Export S-AFF to ONNX and compare deployment friction against Mamba-style models.
+3. Improve PiW multi-person dual-stream training.
+4. Test hard-routing S-AFF for actual conditional computation savings.
+5. Add clean result tables and command logs for reproducibility.
