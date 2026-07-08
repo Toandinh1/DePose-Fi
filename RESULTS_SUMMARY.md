@@ -61,6 +61,32 @@ Interpretation:
 - The medium/small models are better deployment tradeoffs.
 - Separate amplitude/phase CP streams are the right direction for PiW-style 3D pose.
 
+## 2.1 Decomposition Feature Comparison
+
+Script:
+
+```bash
+python experiments/exp26_decomposition_feature_comparison.py
+```
+
+Controlled MM-Fi subset result with 5K train / 1K test frames:
+
+| Feature | Regressor | Dim | MPJPE | PCK20 |
+|---|---|---:|---:|---:|
+| Mean pose | none | 0 | 0.3053 | 47.27 |
+| PCA | Ridge | 128 | 0.3586 | 17.47 |
+| Matrix NMF | Ridge | 128 | 0.4064 | 15.92 |
+| Tucker | Ridge | 553 | 0.3863 | 20.34 |
+| CP | Ridge | 508 | 0.3848 | 19.11 |
+| CP | S-AFF | 508 | 0.3324 | 43.22 |
+
+Interpretation:
+
+- CP factors do not automatically dominate with a linear Ridge regressor.
+- The real gain comes from pairing CP with the decomposition-aware S-AFF architecture.
+- PCA, matrix-NMF, and Tucker features are much weaker under the same lightweight Ridge setup on this subset.
+- This supports the paper argument that CP is useful because it exposes mode-specific components that S-AFF can exploit, not because low-rank compression alone solves HPE.
+
 ## 3. Python Thread Parallelism
 
 Script:
@@ -150,6 +176,7 @@ Strong claims:
 
 - Decomposition-first Wi-Fi HPE can produce a tiny, accurate, hardware-friendly model.
 - S-AFF is mode-aware and interpretable because it fuses CP components rather than raw CSI.
+- CP's advantage appears when paired with a component-aware model; generic PCA/NMF/Tucker features with Ridge are much weaker in the controlled subset.
 - S-AFF is deployment-friendly because it uses standard operators and exports cleanly to ONNX.
 - S-AFF exposes independent component streams, enabling branch-level scheduling on edge hardware.
 - Gate-sharpened S-AFF supports hard-routed inference that skips inactive experts and reduces measured ONNX latency.

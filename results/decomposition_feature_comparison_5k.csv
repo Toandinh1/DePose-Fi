@@ -1,0 +1,7 @@
+method,feature_dim,regressor,train_samples,test_samples,mpjpe,pck20,pck30,pck50,notes
+mean_pose,0,none,5000,1000,0.305295,47.2706,71.7824,85.9353,subset baseline
+pca_128,128,ridge,5000,1000,0.358556,17.4706,34.8706,71.1706,global PCA over flattened CSI
+matrix_nmf_128,128,ridge,5000,1000,0.406427,15.9235,30.4588,56.8765,global matrix NMF over flattened CSI
+tucker_3_4_4,553,ridge,5000,1000,0.386272,20.3353,37.3118,65.7118,per-frame Tucker/HOSVD features
+cp_rank4,508,ridge,5000,1000,0.384796,19.1118,35.8353,65.4647,cached CP factors with Ridge
+cp_rank4_saff,508,S-AFF,5000,1000,0.332440,43.2176,64.9647,83.6412,CP factors with decomposition-aware S-AFF

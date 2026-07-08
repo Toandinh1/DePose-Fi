@@ -113,8 +113,10 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |                                # MM-Fi CP + S-AFF PyTorch/ONNX runtime benchmark
 |   |-- exp24_hard_routed_saff.py
 |   |                            # Hard-routed S-AFF accuracy/compute tradeoff
-|   `-- exp25_mmfi_bonly_runtime.py
+|   |-- exp25_mmfi_bonly_runtime.py
 |                                # Subcarrier-only routed runtime benchmark
+|   `-- exp26_decomposition_feature_comparison.py
+|                                # PCA/NMF/Tucker/CP feature comparison
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -245,6 +247,16 @@ python experiments/exp25_mmfi_bonly_runtime.py
 ```
 
 Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 100% of test frames. Top-1 routed inference preserves the full model's PCK20 in this run while reducing ONNX latency from 86.77 us to 54.18 us.
+
+### Decomposition Feature Comparison
+
+This compares PCA, matrix-NMF, Tucker, and CP features on the same MM-Fi subset using a matched Ridge regressor.
+
+```bash
+python experiments/exp26_decomposition_feature_comparison.py
+```
+
+Current result on 5K train / 1K test frames: PCA/NMF/Tucker/CP with Ridge are weak, while CP + S-AFF is much stronger. This means the win is not low-rank compression alone; the win is CP structure plus component-aware fusion.
 
 ## What We Tried and Learned
 
