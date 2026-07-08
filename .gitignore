@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Large/local datasets and generated caches
+data/*
+!data/
+!data/PersonInWiFi3D_README.md
+outputs/
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.zip
+*.tar
+*.tar.gz
+
+# External cloned repositories
+external/
+
+# Local papers/references that may have redistribution restrictions
+*.pdf
+*_ICML_26__Interleaved_Selective_State_Space_Models_for_Efficient_WiFi_Based_3D_Multi_Person_Pose_Estimation.txt
+WiDeFus.txt
+idea.txt
+
+# LaTeX build products
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

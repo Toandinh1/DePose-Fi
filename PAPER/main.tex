@@ -1,0 +1,414 @@
+\documentclass[10pt,journal]{IEEEtran}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+
+\newcommand{\method}{\mathtt{DePose\mbox{-}Fi}}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\begin{document}
+
+\title{\method: Tensor-Factorized CSI Representation for Wi-Fi Human Pose Estimation}
+
+\author{Toan Gian}
+
+\maketitle
+
+\begin{abstract}
+Wi-Fi human pose estimation (HPE) aims to infer body keypoints from channel state information (CSI), enabling privacy-preserving and illumination-invariant sensing. However, CSI is an indirect wireless measurement: the received signal is a mixture of static environmental reflections, human-induced dynamic multipath, and noise. Directly mapping this mixed observation to pose can entangle environment-specific nuisance factors with pose-relevant motion, especially when multiple people or high-mobility joints are present. This paper proposes \method, a tensor-factorized CSI representation for Wi-Fi HPE. The key idea is to convert dynamic CSI into a non-negative link-Doppler-time tensor and decompose it into latent motion components using constrained CP tensor factorization. Each component contains a link signature, a Doppler signature, and a temporal activation, providing a structured representation of wireless motion evidence. The reconstructed component tensors are stacked and used as input to a pose heatmap estimator. Unlike end-to-end black-box CSI-to-pose models, \method\ explicitly separates mixed CSI into interpretable latent motion components before pose inference. The intended claim is not perfect person-level or limb-level source separation, but rather that tensor-factorized CSI provides a more useful and robust input representation for HPE. We define the mathematical formulation, implementation pipeline, baselines, and evaluation protocol needed to test this claim on single-person and multi-person Wi-Fi sensing data.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Wi-Fi sensing, channel state information, human pose estimation, tensor factorization, CP decomposition, Doppler representation.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Wi-Fi sensing has become an attractive modality for human perception because it can reuse existing wireless infrastructure and does not require cameras or wearable devices. By analyzing channel state information (CSI), a sensing system can infer how human movement perturbs wireless propagation across antennas, subcarriers, and time. Recent learning-based methods have shown promising results for human activity recognition, localization, gesture recognition, and human pose estimation. Among these tasks, Wi-Fi-based HPE is particularly challenging because it requires estimating fine-grained body keypoints from an indirect and heavily mixed wireless observation.
+
+The fundamental difficulty is that CSI is not a direct measurement of the human body. A received CSI sequence contains static reflections from walls and furniture, line-of-sight components, dynamic reflections from one or more people, and noise. A simplified model is
+\begin{equation}
+    H(s,l,t)
+    =
+    H_{\mathrm{static}}(s,l)
+    +
+    \sum_{k=1}^{K}H_k(s,l,t)
+    +
+    N(s,l,t),
+    \label{eq:csi_mixture}
+\end{equation}
+where $s$ is the subcarrier index, $l$ is the antenna-link index, $t$ is time, $K$ is the number of people, $H_k$ denotes the contribution induced by the $k$-th person, and $N$ is noise. In practice, the receiver observes only the mixture. It does not know which part of the signal corresponds to a person, a limb, or an environmental path.
+
+Most deep Wi-Fi HPE methods learn a direct mapping from CSI features to pose labels. This is powerful when training and testing conditions match, but it can encourage the network to absorb nuisance factors such as static multipath and environment-specific patterns. It also provides limited control over keypoint confusion in multi-person scenes, where mixed reflections from different people may overlap in time and frequency. These issues motivate a more structured representation before pose estimation.
+
+This paper explores the following question:
+
+\emph{Can tensor factorization decompose mixed CSI into latent motion components that improve Wi-Fi human pose heatmap estimation?}
+
+We propose \method, a source-aware representation front-end for Wi-Fi HPE. The method first removes the static CSI component, converts dynamic CSI into a link-Doppler-time tensor, and applies non-negative CP tensor factorization. The resulting factors describe which antenna links are affected, what Doppler signatures are present, and when each latent motion component is active. Component-wise tensors reconstructed from these factors are then stacked as channels and fed to a pose heatmap network.
+
+The main contribution is a representation-level decomposition rather than a new heavy pose network. This distinction is important: the same pose estimator should be used for raw Doppler tensors, matrix NMF features, and tensor-factorized features. If the factorized representation improves HPE under the same network, the benefit can be attributed to the input representation rather than to model capacity.
+
+The expected contributions are:
+\begin{itemize}
+    \item A physically motivated CSI decomposition framework that factorizes mixed Wi-Fi CSI into compact link, frequency/Doppler, and temporal components.
+    \item A lightweight component representation that enables simple ML backbones, such as Ridge regression, PLS, tree ensembles, or tiny neural networks, to estimate human pose with low inference cost.
+    \item A decomposition-quality evaluation protocol that measures not only HPE accuracy, but also reconstruction fidelity, component compactness, factor diversity, physical interpretability, and pose relevance.
+    \item A fair frame-level comparison against HPE-Li under the MM-Fi protocol3 setting, where each method receives the same single-frame CSI input.
+    \item A controlled temporal-window study that evaluates whether deeper link-Doppler-time decomposition improves motion-sensitive keypoints when all baselines receive the same temporal context.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Wi-Fi Human Pose Estimation}
+
+Wi-Fi HPE estimates human keypoints from wireless measurements. Compared with camera-based HPE, Wi-Fi sensing is less affected by lighting and can preserve visual privacy. However, it is substantially more indirect: CSI encodes the interaction between radio waves, the environment, and human motion. Recent deep learning methods have improved performance by using convolutional, recurrent, or attention-based models, but many of them still rely on end-to-end feature learning from mixed CSI. \method\ is complementary: it introduces a decomposition front-end that can be paired with a simple heatmap estimator or with stronger HPE backbones.
+
+\subsection{CSI Preprocessing and Doppler Features}
+
+Dynamic human motion affects CSI over time. A common strategy is to suppress static components and extract motion-sensitive features through temporal filtering or time-frequency analysis. Doppler representations are useful because they expose velocity-related patterns induced by moving body parts. However, a raw Doppler tensor can still mix multiple motion sources. \method\ uses Doppler features as an intermediate representation and then decomposes them across link, Doppler, and time dimensions.
+
+\subsection{Matrix and Tensor Factorization}
+
+Matrix factorization has long been used to identify latent components in non-negative data. However, flattening a multi-way CSI tensor into a matrix destroys part of its structure. Tensor factorization preserves multi-dimensional structure and can model interactions across antenna links, Doppler bins, and time windows. CP decomposition represents a tensor as a sum of rank-one components, each with one factor per mode. This makes it suitable for extracting interpretable latent motion patterns from link-Doppler-time CSI.
+
+\subsection{CSI Component Decomposition}
+
+Recent Wi-Fi sensing work has begun to explicitly purify CSI before recognition. WiDeFus reconstructs a human-path phase component from CSI phase differences using Hermite-Gaussian sparse decomposition, and then applies adaptive feature fusion for lightweight human activity recognition~\cite{widefus2026}. This line of work supports the premise that physically motivated CSI decomposition can improve robustness and efficiency. However, WiDeFus focuses on activity classification and extracts a purified human-related phase component. In contrast, \method\ targets fine-grained human pose estimation, where the output is a continuous set of body keypoints. Our objective is to decompose CSI into multiple pose-relevant link-frequency/time or link-Doppler/time components and evaluate whether these components enable lightweight keypoint regression.
+
+\section{Problem Formulation}
+
+Let the raw complex CSI be
+\begin{equation}
+    H\in\mathbb{C}^{N_t\times N_r\times N_f\times T},
+\end{equation}
+where $N_t$ and $N_r$ are the numbers of transmit and receive antennas, $N_f$ is the number of subcarriers, and $T$ is the number of time frames. Each CSI value is
+\begin{equation}
+    H_{i,j,f,t}=A_{i,j,f,t}e^{j\phi_{i,j,f,t}}.
+\end{equation}
+We merge transmit-receive antenna pairs into a link dimension:
+\begin{equation}
+    L=N_tN_r,
+\end{equation}
+and represent CSI as
+\begin{equation}
+    H\in\mathbb{C}^{L\times N_f\times T}.
+\end{equation}
+
+The HPE target is a set of $J$ keypoint heatmaps:
+\begin{equation}
+    Y\in\mathbb{R}^{J\times H_o\times W_o},
+\end{equation}
+where $H_o$ and $W_o$ are the output heatmap height and width. The model predicts
+\begin{equation}
+    \hat{Y}=F_\theta(Z),
+\end{equation}
+where $Z$ is a CSI-derived representation. The central question is how to construct $Z$ so that it preserves pose-relevant motion while reducing nuisance mixing.
+
+\section{Method}
+
+\subsection{Static Removal}
+
+Raw CSI contains strong static reflections. We estimate the static component by temporal averaging:
+\begin{equation}
+    \bar{H}(l,f)=\frac{1}{T}\sum_{t=1}^{T}H(l,f,t).
+\end{equation}
+The dynamic CSI is
+\begin{equation}
+    \Delta H(l,f,t)=H(l,f,t)-\bar{H}(l,f).
+\end{equation}
+This operation suppresses stationary environmental paths and emphasizes human-induced variations. It is simple, but it gives a strong baseline preprocessing step and avoids introducing unnecessary model complexity at the first implementation stage.
+
+\subsection{Link-Doppler-Time Tensor}
+
+Human pose is reflected through motion dynamics, so we convert dynamic CSI into a Doppler representation. For each link and subcarrier, a short-time Fourier transform is applied along the time dimension. We then aggregate power over subcarriers:
+\begin{equation}
+    X(l,d,\tau)
+    =
+    \sum_{f=1}^{N_f}
+    \left|
+    \mathrm{STFT}_t(\Delta H(l,f,t))
+    \right|^2,
+    \label{eq:ldt_tensor}
+\end{equation}
+where $d$ is the Doppler bin and $\tau$ is the STFT window index. The resulting tensor is
+\begin{equation}
+    X\in\mathbb{R}_{+}^{L\times D\times T'}.
+\end{equation}
+This representation keeps three physically meaningful dimensions: antenna-link diversity, motion speed, and temporal activation.
+
+\subsection{Non-Negative CP Factorization}
+
+We decompose the link-Doppler-time tensor using non-negative CP factorization:
+\begin{equation}
+    X(l,d,\tau)
+    \approx
+    \hat{X}(l,d,\tau)
+    =
+    \sum_{r=1}^{R}
+    A(l,r)B(d,r)C(\tau,r),
+    \label{eq:cp}
+\end{equation}
+where $R$ is the number of latent motion components,
+\begin{equation}
+    A\in\mathbb{R}_{+}^{L\times R},\quad
+    B\in\mathbb{R}_{+}^{D\times R},\quad
+    C\in\mathbb{R}_{+}^{T'\times R}.
+\end{equation}
+The factors have intuitive meanings. $A(:,r)$ is the link signature of component $r$, $B(:,r)$ is its Doppler signature, and $C(:,r)$ is its temporal activation. The basic reconstruction loss is
+\begin{equation}
+    \mathcal{L}_{rec}=\|X-\hat{X}\|_F^2.
+\end{equation}
+
+\subsection{Physical Interpretation of Components}
+
+The decomposition is useful only if the factors are not arbitrary numerical bases. We therefore interpret each rank-one term as a latent wireless motion component. In the link-Doppler-time formulation, the factor $A(:,r)$ describes which antenna links are sensitive to component $r$, $B(:,r)$ describes its Doppler or motion-speed signature, and $C(:,r)$ describes when the component is active. A component with concentrated link weights, a clear Doppler peak, and a smooth temporal activation is more physically meaningful than a diffuse component that spreads uniformly across all modes.
+
+For fair single-frame comparison with HPE-Li, the input tensor is
+\begin{equation}
+    X_{\mathrm{fr}} \in \mathbb{R}_{+}^{L\times S\times P},
+\end{equation}
+where $L$ is the link dimension, $S$ is the subcarrier dimension, and $P$ is the short packet dimension inside one MM-Fi frame. The frame-level decomposition is
+\begin{equation}
+    X_{\mathrm{fr}}(l,s,p)
+    \approx
+    \sum_{r=1}^{R}
+    A(l,r)B(s,r)C(p,r).
+    \label{eq:frame_cp}
+\end{equation}
+Here $A(:,r)$ represents link visibility, $B(:,r)$ represents frequency-selective multipath structure, and $C(:,r)$ represents short-time activation within the frame. This version is directly comparable with HPE-Li because it uses exactly one CSI frame per pose prediction.
+
+We evaluate component quality through five criteria. First, reconstruction fidelity measures whether the components preserve CSI structure:
+\begin{equation}
+    e_{\mathrm{rec}}
+    =
+    \frac{\|X-\hat{X}\|_F}{\|X\|_F}.
+\end{equation}
+Second, compactness measures the reduction from raw CSI dimension to component-feature dimension. Third, factor diversity measures whether components are distinct, using off-diagonal correlations of $A$, $B$, and $C$. Fourth, physical interpretability is assessed by visualizing link signatures, frequency or Doppler signatures, and temporal activations. Fifth, pose relevance is measured by component ablation, where each component is removed or isolated and the resulting PCK drop is recorded.
+
+\subsection{Temporal Constraints}
+
+Plain CP decomposition can produce unstable factors. Human motion is temporally continuous, and only a small number of latent motion components should be strongly active at a given time. We therefore include temporal smoothness and sparsity constraints:
+\begin{equation}
+    \mathcal{L}_{smooth}
+    =
+    \sum_{r=1}^{R}\sum_{\tau=2}^{T'}
+    |C(\tau,r)-C(\tau-1,r)|,
+\end{equation}
+and
+\begin{equation}
+    \mathcal{L}_{sparse}=\|C\|_1.
+\end{equation}
+The constrained factorization objective is
+\begin{equation}
+    \mathcal{L}_{fact}
+    =
+    \mathcal{L}_{rec}
+    +
+    \lambda_1\mathcal{L}_{smooth}
+    +
+    \lambda_2\mathcal{L}_{sparse}.
+    \label{eq:fact_loss}
+\end{equation}
+For the first implementation, factorization can be performed offline. A later version can make the factorization layer differentiable and optimize it jointly with pose estimation.
+
+\subsection{Diversity and Pose-Aware Constraints}
+
+Plain CP can reconstruct CSI well while producing redundant components. To encourage physically cleaner factors, we add a diversity penalty:
+\begin{equation}
+    \mathcal{L}_{div}
+    =
+    \|A^TA-I\|_F^2
+    +
+    \|B^TB-I\|_F^2
+    +
+    \|C^TC-I\|_F^2.
+\end{equation}
+This discourages multiple components from explaining the same link, frequency/Doppler, or temporal pattern. When pose labels are available, the decomposition can also be weakly supervised by a lightweight regressor $G_\omega$:
+\begin{equation}
+    \hat{\mathbf{y}}
+    =
+    G_\omega([A(:),B(:),C(:)]),
+\end{equation}
+where $\mathbf{y}$ denotes the pose keypoints. The full objective becomes
+\begin{equation}
+    \mathcal{L}
+    =
+    \mathcal{L}_{rec}
+    +
+    \lambda_{pose}\mathcal{L}_{pose}
+    +
+    \lambda_{div}\mathcal{L}_{div}
+    +
+    \lambda_s\mathcal{L}_{sparse}
+    +
+    \lambda_t\mathcal{L}_{smooth}.
+\end{equation}
+This formulation keeps the decomposition interpretable while encouraging components that are useful for HPE.
+
+\subsection{Component-Wise CSI Reconstruction}
+
+Each latent component is reconstructed as
+\begin{equation}
+    X_r(l,d,\tau)=A(l,r)B(d,r)C(\tau,r).
+\end{equation}
+The complete tensor is approximated by
+\begin{equation}
+    X\approx\sum_{r=1}^{R}X_r.
+\end{equation}
+The component tensors are stacked:
+\begin{equation}
+    Z=[X_1,X_2,\ldots,X_R]
+    \in
+    \mathbb{R}_{+}^{R\times L\times D\times T'}.
+\end{equation}
+This representation is passed to a heatmap estimation network.
+
+\subsection{Lightweight Pose Estimation}
+
+The main goal of the decomposition is to reduce the burden on the pose estimator. If the components are clean and compact, pose can be estimated with a lightweight model instead of a heavy neural network. We therefore consider both simple ML regressors and a small CNN-based heatmap decoder. For keypoint regression, the component feature vector is
+\begin{equation}
+    \mathbf{z}
+    =
+    [A(:),B(:),C(:),\mathbf{e}],
+\end{equation}
+where $\mathbf{e}$ contains component energies and optional summary statistics. A lightweight regressor predicts the keypoints:
+\begin{equation}
+    \hat{\mathbf{y}}=G_\omega(\mathbf{z}).
+\end{equation}
+Candidate regressors include Ridge regression, partial least squares, tree ensembles, and tiny multilayer perceptrons. These models have low memory footprint and can be deployed on resource-constrained devices.
+
+For heatmap estimation, a simple CNN maps $Z$ to heatmaps:
+\begin{equation}
+    \hat{Y}=F_\theta(Z).
+\end{equation}
+The training loss is mean squared heatmap error:
+\begin{equation}
+    \mathcal{L}_{pose}
+    =
+    \sum_{j=1}^{J}
+    \|\hat{Y}_j-Y_j\|_2^2.
+\end{equation}
+Using a simple shared pose network is deliberate. The objective is to evaluate the representation, not to hide representation weaknesses behind a powerful network.
+
+\section{Implementation Plan}
+
+\subsection{Stage 1: Data Loading}
+
+The first code milestone is to load CSI and pose labels. CSI should be reshaped into $L\times N_f\times T$, with antenna pairs merged into the link dimension. Pose labels should be converted into Gaussian keypoint heatmaps. The data loader must support fixed-length temporal windows because both STFT and pose prediction depend on window alignment.
+
+\subsection{Stage 2: Tensor Construction}
+
+For each sample, compute $\Delta H$ through temporal mean subtraction and then compute the link-Doppler-time tensor in \eqref{eq:ldt_tensor}. Hyperparameters include STFT window length, hop size, Doppler bin count, and whether amplitude, phase, or CSI ratio features are used. The first version should use dynamic CSI power for simplicity.
+
+\subsection{Stage 3: Factorization}
+
+Apply non-negative CP factorization for $R\in\{2,4,6,8,12\}$. Save the reconstructed components $X_r$ and factor matrices $A$, $B$, and $C$. The implementation should report normalized reconstruction error:
+\begin{equation}
+    \frac{\|X-\hat{X}\|_F}{\|X\|_F}.
+\end{equation}
+However, $R$ should not be selected only by reconstruction error; the final criterion is pose accuracy.
+
+\subsection{Stage 4: Pose Network}
+
+Train the same pose heatmap network under all input representations:
+\begin{itemize}
+    \item raw dynamic CSI power,
+    \item raw link-Doppler-time tensor,
+    \item matrix NMF features,
+    \item CP tensor-factorized components.
+\end{itemize}
+The architecture, optimizer, training split, and evaluation metrics must be identical across baselines.
+
+\section{Experimental Design}
+
+\subsection{Baselines}
+
+The first baseline uses raw dynamic CSI power:
+\begin{equation}
+    X_{raw}(l,f,t)=|\Delta H(l,f,t)|^2.
+\end{equation}
+The second baseline uses the raw link-Doppler-time tensor $X(l,d,\tau)$ without factorization. The third baseline unfolds $X$ into a matrix and applies non-negative matrix factorization:
+\begin{equation}
+    X_{matrix}\approx WH.
+\end{equation}
+The proposed method uses CP components from \eqref{eq:cp}. The key comparison is therefore raw CSI versus raw Doppler versus matrix NMF versus tensor CP.
+
+\subsection{Metrics}
+
+Pose estimation should be evaluated using PCK at multiple thresholds:
+\begin{equation}
+    \mathrm{PCK}@a
+    =
+    \frac{\text{number of correct keypoints under threshold }a}
+    {\text{total number of keypoints}}.
+\end{equation}
+The paper should report PCK@5, PCK@10, PCK@20, average PCK, and keypoint-wise PCK. Wrists, elbows, knees, and ankles are especially important because they are high-mobility joints and are more likely to benefit from motion decomposition.
+
+Factorization quality should be evaluated using reconstruction error, visualization of $A$, $B$, and $C$, temporal factor stability, and alignment between temporal activations and motion periods.
+
+\subsection{Single-Person Evaluation}
+
+The first real experiment should focus on single-person HPE. This is the minimum setting needed to verify whether tensor-factorized CSI helps pose estimation. The expected result is that CP-factorized features improve difficult keypoints compared with raw Doppler input.
+
+\subsection{Multi-Person Evaluation}
+
+After the single-person experiment works, the method should be evaluated on two-person samples. The goal is to test whether tensor factorization reduces keypoint confusion when multiple motion sources are mixed in CSI. The paper should include failure cases because factorization may not cleanly separate people with similar motion or close spatial positions.
+
+\subsection{Ablation Studies}
+
+The key ablations are:
+\begin{itemize}
+    \item component number $R$,
+    \item unconstrained CP versus smooth/sparse CP,
+    \item matrix NMF versus tensor CP,
+    \item raw Doppler tensor versus reconstructed component tensors,
+    \item single-person versus two-person scenes.
+\end{itemize}
+
+\section{Preliminary Synthetic Sanity Check}
+
+Before real data experiments, we ran a synthetic CP sanity check. A non-negative link-Doppler-time tensor of shape $8\times32\times80$ was generated from four latent motion components with sparse link factors, Gaussian Doppler factors, smooth temporal activations, and additive noise. Non-negative CP factorization recovered the latent structure with relative reconstruction error $0.2212$. The mean matched factor correlations were $0.869$ for link factors, $0.871$ for Doppler factors, and $0.857$ for temporal factors.
+
+This result supports the basic plausibility of the decomposition assumption in controlled data. It does not prove that real CSI factors correspond to people or limbs. Therefore, the real-data experiments must evaluate downstream pose accuracy and factor interpretability.
+
+\section{Discussion}
+
+\subsection{What The Paper Should Claim}
+
+The paper should claim that tensor factorization extracts useful latent motion components from mixed CSI and improves Wi-Fi HPE input representation. It should not claim perfect source separation, person separation, or body-part disentanglement unless real experiments prove it.
+
+\subsection{Main Risk}
+
+The main risk is that CP factorization may reconstruct the Doppler tensor well but discard fine-grained pose information. This is why downstream pose accuracy is more important than factor reconstruction error. Another risk is that a weak pose network may fail even with better features; therefore, all baselines must use the same architecture and training protocol.
+
+\subsection{Path To Publication}
+
+The path to publication is clear. First, show that CP-factorized components outperform raw Doppler tensors in single-person HPE. Second, show that gains concentrate on difficult high-mobility keypoints. Third, show that matrix NMF is weaker than tensor CP, proving that preserving tensor structure matters. Fourth, show qualitative factor visualizations that make the representation interpretable. Finally, extend to two-person scenes and demonstrate reduced confusion or graceful failure.
+
+\section{Conclusion}
+
+This paper proposes \method, a tensor-factorized CSI representation for Wi-Fi human pose estimation. The method removes static CSI, constructs a link-Doppler-time tensor, decomposes it into latent motion components using non-negative CP factorization, and feeds reconstructed component tensors into a pose heatmap estimator. The central hypothesis is that source-aware latent motion components provide a better HPE representation than raw mixed CSI or matrix-based decomposition. The next step is to validate this hypothesis on real CSI-pose datasets using controlled baselines and keypoint-wise analysis.
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{1}
+\bibitem{halperin2011}
+D. Halperin, W. Hu, A. Sheth, and D. Wetherall, ``Tool release: Gathering 802.11n traces with channel state information,'' \emph{ACM SIGCOMM Computer Communication Review}, 2011.
+
+\bibitem{survey2020}
+Y. Ma, G. Zhou, and S. Wang, ``WiFi sensing with channel state information: A survey,'' \emph{ACM Computing Surveys}, 2020.
+
+\bibitem{kolda2009}
+T. G. Kolda and B. W. Bader, ``Tensor decompositions and applications,'' \emph{SIAM Review}, 2009.
+
+\bibitem{lee1999}
+D. D. Lee and H. S. Seung, ``Learning the parts of objects by non-negative matrix factorization,'' \emph{Nature}, 1999.
+
+\bibitem{widefus2026}
+X. Chen, C. Li, W. Meng, and W. Xiao, ``WiDeFus: A Wi-Fi-based lightweight human activity recognition via CSI component decomposition and adaptive feature fusion,'' \emph{IEEE Transactions on Cognitive Communications and Networking}, 2026.
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,171 @@
+\section{Introduction}
+
+Wi-Fi human pose estimation (HPE) aims to recover human body keypoints from channel state information (CSI), enabling privacy-preserving sensing without cameras or wearable devices. Recent learning-based systems have shown that Wi-Fi signals contain rich information about human motion. However, CSI is not a direct observation of the human body. It is a superposition of line-of-sight propagation, static reflections from the environment, dynamic reflections induced by the human body, hardware noise, and multipath interference. As a result, directly feeding raw CSI into a deep model forces the network to solve two difficult problems simultaneously: it must first discover pose-relevant wireless components from a mixed physical signal, and then map those components to body keypoints.
+
+This coupling is inefficient and brittle. A deep model may achieve high in-domain accuracy by absorbing environment-specific or subject-specific patterns, but such representations are difficult to interpret and expensive to deploy on small devices. More importantly, they obscure the physical structure of the wireless sensing problem. If CSI is a mixture of latent propagation and motion components, then a pose estimator should not be required to learn this decomposition implicitly. Instead, the signal should first be decomposed into compact and interpretable factors that expose the link, frequency, and temporal structure of human-induced channel variation.
+
+We propose \textbf{DePose-Fi}, a decomposition-first framework for lightweight Wi-Fi HPE. The central idea is simple: before applying a pose estimator, we factorize CSI into a small number of latent components. Each component is represented by a link factor, a subcarrier or Doppler factor, and a short-time activation factor. These factors provide a compact representation of how a latent wireless component appears across antenna links, frequency bins, and time. Once CSI is decomposed into this structured representation, pose estimation can be performed by a lightweight machine learning model rather than a heavy end-to-end neural network.
+
+This paper argues that decomposition is not merely a preprocessing trick, but a necessary representation step for practical Wi-Fi sensing. Raw CSI is high-dimensional, noisy, and entangled. A decomposition-first design makes the sensing pipeline more interpretable, reduces feature dimensionality, and allows lightweight regressors to approach the accuracy of neural HPE systems. On the MM-Fi frame-level protocol used by HPE-Li, a rank-4 CP decomposition reduces a CSI frame from $3420$ raw values to $508$ factor values. With these compact factors, an ExtraTrees regressor achieves $85.15\%$ PCK$_{50}$ and $55.95\%$ PCK$_{20}$ on the currently available MM-Fi subset, competitive with the reported HPE-Li result while using a classical machine learning backbone.
+
+The main contributions are:
+\begin{itemize}
+    \item We introduce a decomposition-first formulation for Wi-Fi HPE, treating CSI as a structured physical mixture rather than an unstructured neural input.
+    \item We factorize CSI into compact link-frequency-time components and use the resulting factors as lightweight pose features.
+    \item We show that decomposed CSI components are pose-relevant: removing individual components causes up to $9.22$ points of PCK$_{20}$ degradation.
+    \item We provide a component-quality evaluation protocol covering reconstruction fidelity, compactness, factor importance, component ablation, and downstream HPE accuracy.
+    \item We demonstrate that simple ML backbones on decomposed features can approach neural Wi-Fi HPE performance under an HPE-Li-compatible frame-level evaluation.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Wi-Fi Human Pose Estimation}
+
+Wi-Fi HPE estimates human body keypoints from wireless channel measurements. Compared with camera-based HPE, Wi-Fi sensing works without line-of-sight visual observation and preserves visual privacy. Existing Wi-Fi HPE systems typically transform CSI into amplitude, phase, or image-like representations and train neural networks to regress keypoints or heatmaps. HPE-Li is a representative lightweight Wi-Fi HPE method that achieves strong accuracy with an efficient dual selective-kernel architecture. However, even lightweight neural models still learn pose features from mixed CSI. In contrast, our work asks whether CSI can be decomposed into compact physical components before pose estimation, reducing the burden on the learning model.
+
+\subsection{CSI Decomposition and Signal Purification}
+
+CSI decomposition has recently emerged as a useful direction for Wi-Fi sensing. WiDeFus reconstructs a human-path phase component from CSI phase differences using Hermite-Gaussian sparse decomposition, then applies adaptive feature fusion for lightweight human activity recognition. This supports the broader idea that physically motivated CSI purification can improve efficiency and robustness. However, WiDeFus focuses on activity classification and extracts a purified human-related phase component. Our objective is different: we target fine-grained human pose estimation and decompose CSI into multiple pose-relevant components whose factors can be directly analyzed, ablated, and used for keypoint regression.
+
+\subsection{Lightweight Machine Learning for Wireless Sensing}
+
+Traditional ML methods such as linear regression, partial least squares, random forests, and tree ensembles are attractive for tiny devices because they have low inference cost and simple deployment paths. Their weakness is that they often perform poorly on raw high-dimensional CSI. DePose-Fi revisits classical ML under a different assumption: if the wireless signal is first decomposed into meaningful components, the downstream regressor no longer needs to learn a complex representation from scratch. This creates a practical path toward tiny Wi-Fi HPE.
+
+\section{Approach}
+
+\subsection{Frame-Level CSI Tensor}
+
+To compare fairly with HPE-Li, we first use the MM-Fi frame-level input. Each Wi-Fi CSI frame is represented as a non-negative tensor
+\begin{equation}
+    X \in \mathbb{R}_{+}^{L \times S \times P},
+\end{equation}
+where $L$ is the antenna-link dimension, $S$ is the subcarrier dimension, and $P$ is the short packet dimension inside one frame. For MM-Fi, $L=3$, $S=114$, and $P=10$.
+
+\subsection{Component Decomposition}
+
+We approximate the CSI tensor using a rank-$R$ non-negative CP decomposition:
+\begin{equation}
+    X(l,s,p)
+    \approx
+    \hat{X}(l,s,p)
+    =
+    \sum_{r=1}^{R}
+    A(l,r)B(s,r)C(p,r),
+\end{equation}
+where $A \in \mathbb{R}_{+}^{L\times R}$, $B \in \mathbb{R}_{+}^{S\times R}$, and $C \in \mathbb{R}_{+}^{P\times R}$. The three factors have direct interpretations. $A(:,r)$ describes which wireless links are sensitive to component $r$, $B(:,r)$ describes its frequency-selective multipath signature, and $C(:,r)$ describes its short-time activation within the frame.
+
+The decomposed feature vector is
+\begin{equation}
+    z = [A(:), B(:), C(:)].
+\end{equation}
+For rank $R=4$, this gives $3R + 114R + 10R = 508$ features, compared with $3 \times 114 \times 10 = 3420$ raw CSI values. Thus, decomposition gives a $6.73\times$ compact representation while preserving the multi-way structure of CSI.
+
+\subsection{Lightweight Pose Regression}
+
+Given decomposed features $z$, we train lightweight regressors to predict the 3D keypoint vector $y \in \mathbb{R}^{17\times 3}$. We evaluate Ridge regression, partial least squares, a small multilayer perceptron, and ExtraTrees regression. The purpose is not to maximize model capacity, but to test whether decomposition makes pose estimation simple enough for tiny deployment.
+
+\subsection{Component Quality Evaluation}
+
+Because decomposition is the main contribution, we evaluate component quality explicitly. We measure:
+\begin{itemize}
+    \item reconstruction error $\|X-\hat{X}\|_F/\|X\|_F$;
+    \item feature compactness relative to raw CSI;
+    \item downstream PCK and MPJPE;
+    \item component ablation, where one component is removed at test time;
+    \item factor-mode ablation, where the link, subcarrier, or packet factor is removed;
+    \item feature importance over components and factor modes.
+\end{itemize}
+
+This evaluation distinguishes useful decomposition from cosmetic dimensionality reduction.
+
+\section{Experiments}
+
+\subsection{Dataset and Protocol}
+
+We evaluate on MM-Fi using the same frame-level setting as HPE-Li. Each sample contains one Wi-Fi CSI frame and one pose label. We follow the protocol3 action setting and HPE-Li-style PCK metric, where 2D keypoint error is normalized by the torso scale defined by keypoints 1 and 11.
+
+At the current stage, the local MM-Fi extraction contains $178{,}497$ usable frame samples out of the expected $320{,}760$ full frame samples. Therefore, the reported results are a protocol-compatible feasibility study, not yet the final full-MM-Fi result.
+
+\subsection{Baselines}
+
+We compare:
+\begin{itemize}
+    \item mean pose, which ignores CSI;
+    \item raw CSI statistics with lightweight regressors;
+    \item CP-decomposed components with the same regressors;
+    \item the reported HPE-Li result as an external reference.
+\end{itemize}
+
+\subsection{Metrics}
+
+We report PCK$_{50}$, PCK$_{40}$, PCK$_{30}$, PCK$_{20}$, PCK$_{10}$, and MPJPE. We also report inference time per sample for lightweight regressors.
+
+\section{Results}
+
+\subsection{Pose Estimation Accuracy}
+
+\begin{table}[t]
+\centering
+\caption{Frame-level MM-Fi feasibility results on the available subset.}
+\begin{tabular}{lccccc}
+\toprule
+Method & PCK$_{50}$ & PCK$_{40}$ & PCK$_{30}$ & PCK$_{20}$ & MPJPE \\
+\midrule
+Mean pose & 82.82 & 74.75 & 63.02 & 45.81 & 0.208 \\
+Raw stats + Ridge & 83.55 & 76.94 & 67.05 & 49.61 & 0.200 \\
+Raw stats + MLP64 & 84.21 & 78.05 & 68.57 & 52.08 & 0.197 \\
+Raw stats + ExtraTrees & 84.74 & 78.37 & 69.18 & 53.81 & 0.190 \\
+CP components + Ridge & 83.38 & 76.66 & 66.52 & 49.09 & 0.201 \\
+CP components + MLP64 & 83.90 & 77.54 & 67.84 & 51.59 & 0.198 \\
+CP components + ExtraTrees & \textbf{85.15} & \textbf{79.27} & \textbf{70.44} & \textbf{55.95} & \textbf{0.185} \\
+HPE-Li reported & 85.12 & 78.18 & 68.22 & 52.07 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+CP components with ExtraTrees achieve the best result among the evaluated lightweight models. The result suggests that decomposed CSI factors provide a compact but predictive representation for HPE.
+
+\subsection{Component Pose Relevance}
+
+\begin{table}[t]
+\centering
+\caption{Component ablation with CP components + ExtraTrees.}
+\begin{tabular}{lcc}
+\toprule
+Input & PCK$_{20}$ & Drop \\
+\midrule
+All components & 55.95 & 0.00 \\
+Drop component 0 & 48.38 & -7.57 \\
+Drop component 1 & 50.90 & -5.05 \\
+Drop component 2 & 52.06 & -3.89 \\
+Drop component 3 & 46.73 & -9.22 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Removing any component reduces PCK$_{20}$, showing that the factors are pose-relevant rather than decorative. Component 3 is the most important under this setting.
+
+\subsection{Factor-Mode Importance}
+
+\begin{table}[t]
+\centering
+\caption{Factor-mode ablation.}
+\begin{tabular}{lcc}
+\toprule
+Dropped factor & PCK$_{20}$ & Drop \\
+\midrule
+None & 55.95 & 0.00 \\
+Link factor $A$ & 55.28 & -0.67 \\
+Subcarrier factor $B$ & 44.17 & -11.78 \\
+Packet factor $C$ & 55.70 & -0.25 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The subcarrier factor dominates pose prediction in the frame-level setting. This is physically plausible because one MM-Fi frame contains only 10 packets, limiting temporal motion information. It also motivates a second controlled experiment using equal temporal windows, where Doppler/time factors can be evaluated more meaningfully.
+
+\section{Discussion and Next Steps}
+
+These results show that the decomposition-first idea is feasible. Compact CP factors can support strong pose regression with classical ML, and ablation confirms that individual components contribute to keypoint accuracy. However, vanilla CP is not yet sufficient as a final contribution. Although reconstruction error is low, factor correlations remain high, meaning the components are predictive but not fully clean physical sources.
+
+The next step is constrained, pose-aware decomposition. We will augment reconstruction with diversity, sparsity, temporal smoothness, and pose-aware objectives. The goal is to make the components both predictive and physically cleaner. Full-MM-Fi validation is also required before final submission.
