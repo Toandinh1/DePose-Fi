@@ -2,8 +2,6 @@
 
 This repository contains the research code and paper draft for a decomposition-first Wi-Fi human pose estimation project.
 
-The current system name in the paper is **SwiftPose-Fi**. The GitHub repository name is **DePose-Fi** because the original idea started from decomposing Wi-Fi CSI before pose estimation.
-
 ## Project Goal
 
 Wi-Fi human pose estimation can work without cameras, but many existing methods directly feed raw channel state information (CSI) into large neural networks. That gives good accuracy, but it is difficult to deploy on small edge hardware.
