@@ -117,8 +117,10 @@ This is not yet a SOTA accuracy win. The honest interpretation is:
 |                                # Subcarrier-only routed runtime benchmark
 |   |-- exp26_decomposition_feature_comparison.py
 |                                # PCA/NMF/Tucker/CP feature comparison
-|   `-- exp27_decomposition_regressor_ablation.py
-|                                # PCA/NMF/Tucker/CP with neural regressors
+|   |-- exp27_decomposition_regressor_ablation.py
+|   |                            # PCA/NMF/Tucker/CP with neural regressors
+|   `-- exp28_resource_aware_rank_selector.py
+|                                # Resource-aware CP rank/profile selector
 |-- PAPER/
 |   |-- deposefi_systems_draft.tex
 |   `-- figures/
@@ -250,6 +252,24 @@ python experiments/exp25_mmfi_bonly_runtime.py
 
 Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 100% of test frames. Top-1 routed inference preserves the full model's PCK20 in this run while reducing ONNX latency from 86.77 us to 54.18 us.
 
+### Resource-Aware Rank Selection
+
+This simulates a proactive hardware scheduler. The app observes available CPU budget and chooses the highest CP-rank profile that satisfies a latency target.
+
+```bash
+python experiments/exp28_resource_aware_rank_selector.py
+```
+
+Current 20 ms latency-budget simulation:
+
+| CPU Available | Selected Rank | Effective Latency | FPS | Assumed PCK20 |
+|---:|---:|---:|---:|---:|
+| 20% | 4 | 18.02 ms | 55.49 | 50.80 |
+| 40% | 8 | 17.50 ms | 57.14 | 52.10 |
+| 80% | 8 | 8.75 ms | 114.29 | 52.10 |
+
+The latency side is based on rank-specific ONNX S-AFF measurements plus calibrated CP extraction cost. The R=2/6/8 PCK20 values are explicit profile assumptions until those ranks are fully trained. The useful finding is that CP rank gives us a controllable runtime knob: under heavy CPU load the selector drops to R=4, and under lighter load it can choose R=8.
+
 ### Decomposition Feature Comparison
 
 This compares PCA, matrix-NMF, Tucker, and CP features using matched neural regressors. The full run uses the official MM-Fi protocol-3 split from `D:\TinySense\MM-Fi`.
@@ -280,6 +300,7 @@ Current full-MM-Fi result:
 - Query-style heads are necessary for multi-person Person-in-WiFi 3D.
 - Separate amplitude/phase CP streams improve Person-in-WiFi 3D single-person accuracy.
 - S-AFF exposes branch-level parallelism, but the first Python-thread benchmark shows no batch-1 latency gain yet.
+- CP rank enables proactive resource-aware deployment: the runtime can select R=4 under heavy CPU load and R=8 when more CPU is available.
 
 ### Did Not Work Well Yet
 
@@ -303,6 +324,7 @@ Current framing:
 - Person-in-WiFi 3D is a generalization/stress-test setting.
 - We should not claim SOTA on PiW yet.
 - The PiW lesson is that separate amplitude/phase CP streams are required for stronger 3D performance.
+- The new systems contribution is resource-aware rank/profile selection: adapt CP rank to current hardware availability instead of deploying one fixed model.
 
 ## Git Hygiene
 

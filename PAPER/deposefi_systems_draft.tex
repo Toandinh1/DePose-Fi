@@ -646,12 +646,30 @@ Profile & Rank & Iters & Cost & Target \\
 \midrule
 SwiftPose-Fi-S & 2 & 5 & Lowest & Tiny CPU \\
 SwiftPose-Fi-M & 4 & 10 & Medium & Edge CPU \\
-SwiftPose-Fi-L & 6 & 15 & Higher & Edge GPU \\
+SwiftPose-Fi-L & 6 & 10--15 & Higher & Edge GPU \\
+SwiftPose-Fi-XL & 8 & 10--15 & Highest & Unloaded edge \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The current experiments evaluate the middle profile, SwiftPose-Fi-M, because it balances accuracy and cost. A complete deployment study should evaluate all three profiles on Raspberry Pi and Jetson Nano. This will let the system choose a profile based on device capability, latency target, or battery constraint.
+The current experiments evaluate the middle profile, SwiftPose-Fi-M, because it balances accuracy and cost. To test whether this knob can support proactive hardware adaptation, we simulate a resource-aware selector. The selector observes available CPU fraction and chooses the highest-accuracy rank profile satisfying a 20 ms frame-latency budget. ONNX latency is measured for rank-specific S-AFF graphs on CPU; CP latency is estimated from the measured rank-4 CP extraction cost and scaled linearly with rank. The PCK$_{20}$ values for ranks 2, 6, and 8 are profile assumptions until those exact ranks are fully trained, while rank 4 is anchored to the measured CP+S-AFF result.
+
+\begin{table}[t]
+\centering
+\caption{Resource-aware rank selection simulation with a 20 ms latency budget. CPU availability scales effective latency as $\ell/\rho$, where $\rho$ is the available CPU fraction.}
+\label{tab:resource_rank}
+\begin{tabular}{lrrrr}
+\toprule
+CPU available & Selected rank & Effective latency & FPS & Assumed PCK$_{20}$ \\
+\midrule
+20\% & 4 & 18.02 ms & 55.49 & 50.80 \\
+40\% & 8 & 17.50 ms & 57.14 & 52.10 \\
+80\% & 8 & 8.75 ms & 114.29 & 52.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:resource_rank} shows why CP rank is a useful systems knob. When the CPU is heavily loaded, the selector drops to rank 4 to stay within the latency budget. When more CPU is available, it chooses rank 8 for higher assumed accuracy. The important claim is not that these assumed rank accuracies are final; it is that SwiftPose-Fi exposes a measurable and controllable rank-latency trade-off that can be used by a runtime scheduler.
 
 \subsection{Hardware Experiment Design}
 

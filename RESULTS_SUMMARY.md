@@ -192,6 +192,37 @@ This gives us a concrete deployment contribution:
 
 > S-AFF is not only branch-structured; its learned sparse gate can be converted into a hard routing policy that skips inactive experts at inference time.
 
+## 4.2 Resource-Aware Rank Selection
+
+Script:
+
+```bash
+python experiments/exp28_resource_aware_rank_selector.py
+```
+
+This simulates a proactive edge scheduler. The runtime observes available CPU budget and chooses the highest CP-rank profile that satisfies a 20 ms frame-latency target. The latency side uses rank-specific ONNX S-AFF measurements plus calibrated CP extraction cost. The R=2/6/8 PCK20 values are scenario assumptions until those ranks are fully trained; R=4 is anchored to the measured CP+S-AFF result.
+
+Rank profiles at 100% CPU:
+
+| Rank | Params | Assumed PCK20 | CP latency | ONNX S-AFF latency | Total latency |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 64.1K | 47.00 | 1.70 ms | 0.172 ms | 1.87 ms |
+| 4 | 64.9K | 50.80 | 3.40 ms | 0.204 ms | 3.60 ms |
+| 6 | 65.6K | 51.60 | 5.10 ms | 0.156 ms | 5.26 ms |
+| 8 | 66.4K | 52.10 | 6.80 ms | 0.200 ms | 7.00 ms |
+
+Selector outcome with a 20 ms target:
+
+| CPU Available | Selected Rank | Effective Latency | Effective FPS | Assumed PCK20 |
+|---:|---:|---:|---:|---:|
+| 20% | 4 | 18.02 ms | 55.49 | 50.80 |
+| 40% | 8 | 17.50 ms | 57.14 | 52.10 |
+| 80% | 8 | 8.75 ms | 114.29 | 52.10 |
+
+Takeaway:
+
+> CP rank is a real systems knob. Under heavy CPU contention, the scheduler lowers rank to stay inside the latency budget; when resources are available, it chooses a higher-rank profile for better accuracy.
+
 ## 5. Current Contribution Framing
 
 Strong claims:
@@ -202,6 +233,7 @@ Strong claims:
 - S-AFF is deployment-friendly because it uses standard operators and exports cleanly to ONNX.
 - S-AFF exposes independent component streams, enabling branch-level scheduling on edge hardware.
 - Gate-sharpened S-AFF supports hard-routed inference that skips inactive experts and reduces measured ONNX latency.
+- CP rank supports proactive resource-aware deployment, where the runtime selects the largest feasible rank under the current CPU budget.
 
 Claims we should avoid until we have real-device evidence:
 
@@ -216,3 +248,4 @@ Claims we should avoid until we have real-device evidence:
 3. Implement hard-routing S-AFF to skip inactive branches.
 4. Train full mixed-person dual amplitude/phase CP + S-AFF on Person-in-WiFi 3D.
 5. Add energy/FPS/memory reporting for real edge hardware.
+6. Train and evaluate true R=2/6/8 MM-Fi accuracy profiles to replace the resource-selector assumptions.
