@@ -252,27 +252,11 @@ python experiments/exp25_mmfi_bonly_runtime.py
 
 Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 100% of test frames. Top-1 routed inference preserves the full model's PCK20 in this run while reducing ONNX latency from 86.77 us to 54.18 us.
 
-### Resource-Aware Rank Selection
 
-This simulates a proactive hardware scheduler. The app observes available CPU budget and chooses the highest CP-rank profile that satisfies a latency target.
-
-```bash
-python experiments/exp28_resource_aware_rank_selector.py
-```
-
-Current 20 ms latency-budget simulation:
-
-| CPU Available | Selected Rank | Effective Latency | FPS | Assumed PCK20 |
-|---:|---:|---:|---:|---:|
-| 20% | 4 | 18.02 ms | 55.49 | 50.80 |
-| 40% | 8 | 17.50 ms | 57.14 | 52.10 |
-| 80% | 8 | 8.75 ms | 114.29 | 52.10 |
-
-The latency side is based on rank-specific ONNX S-AFF measurements plus calibrated CP extraction cost. The R=2/6/8 PCK20 values are explicit profile assumptions until those ranks are fully trained. The useful finding is that CP rank gives us a controllable runtime knob: under heavy CPU load the selector drops to R=4, and under lighter load it can choose R=8.
 
 #### Proactive Rank Adaptation (formalized)
 
-The table above is a static lookup. The paper (`PAPER/deposefi_systems_draft.tex`, "Proactive Resource-Aware Rank Adaptation") formalizes it as an online control problem so it stands as a contribution rather than a threshold heuristic:
+"Proactive Resource-Aware Rank Adaptation" formalizes it as an online control problem so it stands as a contribution rather than a threshold heuristic:
 
 - **Why CP makes it cheap:** CP ranks are *nested and additive* (rank-R = rank-(R-1) + one more rank-1 term), so SwiftPose-Fi is a single *anytime* predictor. Components are computed one at a time and inference can stop at any rank. Switching cost is near zero and the memory footprint is one model, unlike a generic model zoo that must hold and reload several networks.
 - **Control objective:** at each frame pick the most accurate rank whose *predicted* latency `L(R)/rho_hat` fits the deadline `D`, where `rho_hat` is a forecast of available CPU. Hysteresis prevents oscillation.
