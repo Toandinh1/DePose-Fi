@@ -270,6 +270,17 @@ Current 20 ms latency-budget simulation:
 
 The latency side is based on rank-specific ONNX S-AFF measurements plus calibrated CP extraction cost. The R=2/6/8 PCK20 values are explicit profile assumptions until those ranks are fully trained. The useful finding is that CP rank gives us a controllable runtime knob: under heavy CPU load the selector drops to R=4, and under lighter load it can choose R=8.
 
+#### Proactive Rank Adaptation (formalized)
+
+The table above is a static lookup. The paper (`PAPER/deposefi_systems_draft.tex`, "Proactive Resource-Aware Rank Adaptation") formalizes it as an online control problem so it stands as a contribution rather than a threshold heuristic:
+
+- **Why CP makes it cheap:** CP ranks are *nested and additive* (rank-R = rank-(R-1) + one more rank-1 term), so SwiftPose-Fi is a single *anytime* predictor. Components are computed one at a time and inference can stop at any rank. Switching cost is near zero and the memory footprint is one model, unlike a generic model zoo that must hold and reload several networks.
+- **Control objective:** at each frame pick the most accurate rank whose *predicted* latency `L(R)/rho_hat` fits the deadline `D`, where `rho_hat` is a forecast of available CPU. Hysteresis prevents oscillation.
+- **Proactive vs reactive:** the controller acts on the forecast `rho_hat` so rank is set *before* the deadline, unlike a reactive policy that lowers rank only after a miss.
+- **Planned evaluation:** drive the estimator with time-varying CPU contention and compare fixed-R2, fixed-R8, reactive, proactive, and an oracle upper bound on deadline-miss rate, delivered PCK20, and switch count.
+
+Remaining work to promote this from mechanism to measured result: (1) train true R=2/6/8 accuracies to replace the placeholders, and (2) run the contention comparison above.
+
 ### Decomposition Feature Comparison
 
 This compares PCA, matrix-NMF, Tucker, and CP features using matched neural regressors. The full run uses the official MM-Fi protocol-3 split from `D:\TinySense\MM-Fi`.
