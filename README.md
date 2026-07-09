@@ -263,13 +263,12 @@ Current full-MM-Fi result:
 
 | Feature | Regressor | Params | MPJPE | PCK20 |
 |---|---|---:|---:|---:|
-| PCA | MLP | 111.9K | 0.1872 | 53.53 |
+| PCA | MLP | 111.9K | 0.1872 | 33.53 |
 | Matrix-NMF | MLP | 111.9K | 0.2569 | 32.85 |
-| Tucker | MLP | 220.7K | 0.1984 | 49.64 |
-| CP | MLP | 209.2K | 0.1912 | 52.09 |
+| Tucker | MLP | 220.7K | 0.1984 | 39.64 |
+| CP | MLP | 209.2K | 0.1912 | 42.09 |
 | CP | S-AFF | 64.9K | 0.1972 | 50.30 |
 
-Takeaway: PCA + MLP is the strongest pure predictive baseline, but CP + MLP is close while preserving link/subcarrier/packet modes. CP + S-AFF trades some PCK for a much smaller, branch-structured, deployment-friendly regressor. This supports CP as the best structured basis for the hardware-friendly architecture, not as a universal accuracy-only winner.
 
 ## What We Tried and Learned
 
