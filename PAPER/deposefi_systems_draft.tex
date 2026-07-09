@@ -3,6 +3,8 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 \newcommand{\method}{SwiftPose-Fi}
 
@@ -670,6 +672,53 @@ CPU available & Selected rank & Effective latency & FPS & Assumed PCK$_{20}$ \\
 \end{table}
 
 Table~\ref{tab:resource_rank} shows why CP rank is a useful systems knob. When the CPU is heavily loaded, the selector drops to rank 4 to stay within the latency budget. When more CPU is available, it chooses rank 8 for higher assumed accuracy. The important claim is not that these assumed rank accuracies are final; it is that SwiftPose-Fi exposes a measurable and controllable rank-latency trade-off that can be used by a runtime scheduler.
+
+\subsection{Proactive Resource-Aware Rank Adaptation}
+\label{sec:proactive}
+
+The selector above is a static lookup: given a CPU reading, return a rank. This section formalizes the mechanism as an online control problem and explains why it is a contribution rather than a threshold table. Edge sensing gateways rarely run a pose estimator in isolation; they share a CPU with networking, logging, and other sensing tasks, so the compute available to the estimator varies over time. A fixed rank is therefore the wrong abstraction: a high rank misses frame deadlines under contention, while a low rank wastes capacity when the device is idle. \method\ instead treats CP rank as a runtime-controlled variable and adapts it \emph{proactively} to the predicted compute budget.
+
+\textbf{Why decomposition makes this cheap.}
+A generic ``model zoo'' can also switch between fast and slow models, but it must hold several independent networks in memory and pay a load or context-switch cost to change models. CP rank is fundamentally different because the ranks are \emph{nested and additive}. A rank-$R$ reconstruction is exactly the rank-$(R{-}1)$ reconstruction plus one additional rank-1 term,
+\begin{equation}
+\hat{\mathcal{X}}_R = \sum_{r=1}^{R} \lambda_r\, \mathbf{a}_r \circ \mathbf{b}_r \circ \mathbf{c}_r = \hat{\mathcal{X}}_{R-1} + \lambda_R\, \mathbf{a}_R \circ \mathbf{b}_R \circ \mathbf{c}_R,
+\end{equation}
+and the S-AFF experts already operate per component. This yields a single \emph{anytime} predictor: components are computed one at a time and evaluation can terminate at any $R$, so switching cost is near zero, memory footprint is a single model, and a mid-frame budget shock can be absorbed by stopping early rather than dropping the frame. This monotone quality ladder is a property of the decomposition, not an engineering add-on, and it is what separates \method\ from slimmable or early-exit networks that require purpose-built multi-width training.
+
+\textbf{Control objective.}
+Let $D$ be the per-frame latency deadline and $\rho_t \in (0,1]$ the fraction of one core available to the estimator during frame $t$. The effective latency of rank $R$ is modeled as $L(R)/\rho_t$, where $L(R)$ is the measured single-core latency and $A(R)$ the measured accuracy at rank $R$. Because $\rho_t$ is not known until the frame runs, we forecast it as $\hat{\rho}_t$ from recent history. At each frame the controller solves
+\begin{equation}
+R_t^{\star} = \arg\max_{R \in \{2,4,6,8\}} A(R) \quad \text{s.t.} \quad \frac{L(R)}{\hat{\rho}_t} \le D,
+\label{eq:proactive}
+\end{equation}
+choosing the most accurate rank whose predicted latency fits the deadline. To avoid oscillation near a boundary, a switch is committed only if the candidate strictly dominates the current rank by a hysteresis margin $\delta$. Algorithm~\ref{alg:proactive} gives the full procedure; the word \emph{proactive} refers to acting on the forecast $\hat{\rho}_t$ so the rank is set \emph{before} the deadline, in contrast to a reactive policy that lowers rank only after a miss is observed.
+
+\begin{algorithm}[t]
+\caption{Proactive resource-aware rank control}
+\label{alg:proactive}
+\begin{algorithmic}[1]
+\Require latency model $L(\cdot)$, accuracy model $A(\cdot)$, deadline $D$, hysteresis $\delta$, smoothing $\alpha$
+\State $\hat{\rho} \gets 1$;\ \ $R \gets 4$ \Comment{initialize budget estimate and rank}
+\For{each frame $t$ with CSI tensor $\mathcal{X}_t$}
+  \State $\hat{\rho} \gets \alpha\,\rho_{t-1} + (1-\alpha)\,\hat{\rho}$ \Comment{proactive budget forecast (EWMA)}
+  \State $\mathcal{F} \gets \{\, R' : L(R')/\hat{\rho} \le D \,\}$ \Comment{feasible ranks}
+  \State $R^{\star} \gets \max \mathcal{F}$ \textbf{if} $\mathcal{F} \ne \emptyset$ \textbf{else} $\min$ rank
+  \If{$A(R^{\star}) > A(R) + \delta$ \textbf{or} $L(R)/\hat{\rho} > D$}
+    \State $R \gets R^{\star}$ \Comment{commit switch only past hysteresis}
+  \EndIf
+  \State incrementally compute CP components $1..R$ of $\mathcal{X}_t$
+  \State \textbf{if} deadline exceeded mid-frame \textbf{then} stop at current $R$ \Comment{anytime}
+  \State predict pose with S-AFF over available components
+  \State observe realized $\rho_t$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Evaluation design.}
+Establishing this as a contribution requires showing the controller beats obvious alternatives under time-varying load, not just that a lookup table exists. We plan to drive the estimator with realistic CPU contention traces (synthetic bursts plus a co-running background workload) and compare five policies: fixed low rank ($R{=}2$), fixed high rank ($R{=}8$), a reactive controller that lowers rank one step after each deadline miss, our proactive controller (Algorithm~\ref{alg:proactive}), and an oracle with perfect knowledge of $\rho_t$ as an upper bound. Reported metrics are deadline-miss rate, mean delivered PCK$_{20}$, number of rank switches, and accuracy delivered under budget. The target result is that the proactive controller approaches the oracle while both fixed baselines fail on one axis each: fixed high rank misses deadlines under contention and fixed low rank forfeits accuracy when the device is idle.
+
+\textbf{Current status.}
+The controller and the nested anytime execution path are the algorithmic contribution; their accuracy models $A(R)$ require the true rank-$\{2,6,8\}$ CP+S-AFF accuracies, which are the placeholder values in Table~\ref{tab:resource_rank}. Replacing those placeholders with measured accuracies and running the contention comparison above is the remaining work needed to promote this section from mechanism to measured result. We deliberately do not claim proactive adaptation is validated until that experiment is complete.
 
 \subsection{Hardware Experiment Design}
 
