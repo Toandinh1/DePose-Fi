@@ -1,4 +1,4 @@
-# SwiftPose-Fi / DePose-Fi: Two Systems Mechanisms
+# DePose-Fi: Two Systems Mechanisms
 
 This note explains, for co-authors, the two systems-level mechanisms in the
 decomposition-guided Wi-Fi HPE pipeline:
