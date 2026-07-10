@@ -21,6 +21,14 @@ Our main pipeline is:
 4. Feed these components into **Selective Component-Adaptive Fusion (S-AFF)**.
 5. Predict human pose with a lightweight model built from standard operations.
 
+## Systems Mechanisms (for co-authors)
+
+See **[`MECHANISMS.md`](MECHANISMS.md)** for a self-contained explanation of the two
+systems-level mechanisms — **Proactive Resource-Aware Rank Adaptation (PRA)** and
+**Distributed & Parallel Execution** — including the controller, the accuracy/latency
+models, when PRA actually wins, the fork–join structure of S-AFF, and the current
+results status.
+
 ## Main Takeaway
 
 The strongest result is on **MM-Fi**, where the decomposition + S-AFF design gives a much smaller model while staying close to a strong Wi-Fi HPE baseline.

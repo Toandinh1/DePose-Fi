@@ -331,6 +331,58 @@ For $L=3$, $S=114$, $P=10$, and $R=4$, one CP update iteration costs approximate
 
 S-AFF is composed of standard neural operators: linear layers, 1D convolutions, pooling, ReLU, and softmax. This makes it portable to common deployment stacks. For Raspberry Pi, the target path is ONNX Runtime or TorchScript CPU inference. For Jetson Nano, TensorRT or TorchScript can be used. The CP stage can initially run as optimized NumPy/C++ code; a later version can replace iterative CP with a learned feed-forward factor extractor if CP becomes the latency bottleneck.
 
+\subsection{Distributed and Parallel Execution}
+\label{sec:parallel}
+
+A useful property of the decomposition-guided design is that the predictor is a \emph{fork--join} dataflow rather than a monolithic network, so parts of it map naturally onto parallel or heterogeneous hardware. We make this explicit and, importantly, bound how much it can help so the systems claim stays honest.
+
+\textbf{Where the independence actually is.}
+After CP produces the three factor matrices $A\in\mathbb{R}^{L\times R}$, $B\in\mathbb{R}^{S\times R}$, $C\in\mathbb{R}^{P\times R}$, the three mode-specialized encoders read \emph{disjoint} slices of the factor vector and share no weights or activations. Their outputs $f_A=g_A(A)$, $f_B=g_B(B)$, $f_C=g_C(C)$ are therefore data-independent and can be computed concurrently on three lanes. All coupling is deferred to a single join point: the fused expert $f_F=\mathrm{fuse}([f_A,f_B,f_C])$, the gate $\alpha=\mathrm{softmax}(W_g[f_A,f_B,f_C]/\tau)$, the gated combination $b=\sum_m \alpha_m\, \mathrm{proj}_m$, and the query decoder all execute after a barrier. This is a map (three branches) followed by a reduce (fuse/gate/decode), not a set of independent end-to-end pipelines.
+
+\textbf{Work--span bound for the S-AFF stage.}
+Let $w_A,w_B,w_C$ be the per-frame cost of the three encoders and $w_J$ the cost of the joined fuse/gate/decode stage. Sequential execution costs $T_\text{seq}=w_A+w_B+w_C+w_J$; ideal three-lane execution costs $T_\text{par}=\max(w_A,w_B,w_C)+w_J$. The attainable speedup of the S-AFF stage is thus bounded by $(w_A+w_B+w_C)/\max(w_A,w_B,w_C)\le 3$, and in practice is smaller because the subcarrier branch (two 1D-convolution blocks) dominates $w_B\gg w_A,w_C$; the link and packet branches are shallow dense/1D-conv maps. Branch parallelism is therefore a modest constant-factor win \emph{on the S-AFF stage only}.
+
+\textbf{The stage that dominates is CP, so pipelining is the stronger lever.}
+The per-frame cost is $T_\text{CP}+T_\text{S\text{-}AFF}$, and $T_\text{CP}$ (iterative ALS) dominates $T_\text{S\text{-}AFF}$. Because the two stages are sequential \emph{within} a frame but independent \emph{across} frames, we double-buffer them: while stage~1 factorizes frame $t{+}1$, stage~2 runs S-AFF on frame $t$ (Alg.~\ref{alg:pipeline}). Steady-state throughput becomes $1/\max(T_\text{CP},T_\text{S\text{-}AFF})$ instead of $1/(T_\text{CP}+T_\text{S\text{-}AFF})$. Since $T_\text{CP}\gg T_\text{S\text{-}AFF}$, S-AFF is almost fully hidden behind the next frame's factorization: the correct conclusion is that intra-S-AFF branch parallelism matters little \emph{unless} CP is separately accelerated or offloaded, at which point S-AFF re-enters the critical path and Alg.~\ref{alg:forkjoin} becomes worthwhile. The rank $R$ selected by the runtime rank-adaptation controller sets both $T_\text{CP}$ and the branch input width, so it also controls the pipeline balance.
+
+\textbf{Heterogeneous mapping and data parallelism.}
+The conv-heavy subcarrier branch maps well to an NPU/DSP while the dense link and packet branches run on CPU, allowing the branches to overlap on distinct units at no extra energy. Within CP, the matricized tensor-times-Khatri-Rao products are data-parallel across the $R$ components and across the three physical links (a $3\times3$ antenna array in Person-in-WiFi~3D), and the $Q$ person queries in the decoder are already a batched matmul with coupling confined to one small attention mixer.
+
+\begin{algorithm}[t]
+\caption{Fork--join S-AFF inference (per frame)}
+\label{alg:forkjoin}
+\begin{algorithmic}[1]
+\Require CP factors $A,B,C$ at rank $R$
+\State \textbf{parallel do} \Comment{three independent lanes}
+\State \quad lane 1: $f_A \gets g_A(A)$
+\State \quad lane 2: $f_B \gets g_B(B)$ \Comment{heaviest; place on NPU/DSP}
+\State \quad lane 3: $f_C \gets g_C(C)$
+\State \textbf{barrier}
+\State $h \gets \mathrm{normalize}([f_A,f_B,f_C])$; \quad $f_F \gets \mathrm{fuse}(h)$
+\State $\alpha \gets \mathrm{softmax}(W_g h/\tau)$; \quad $b \gets \sum_m \alpha_m \mathrm{proj}_m(f_m)$
+\State $\{$poses, conf, count$\} \gets \mathrm{QueryDecoder}(b)$
+\State \Return top-$k$ poses by confidence
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Pipelined streaming with rank adaptation}
+\label{alg:pipeline}
+\begin{algorithmic}[1]
+\State double buffer $\mathcal{B}_0,\mathcal{B}_1$ for factor outputs
+\For{each frame $t$}
+  \State $R_t \gets \textsc{SelectRank}(\hat{\rho}_t, D)$ \Comment{proactive controller}
+  \State \textbf{concurrently}:
+  \State \quad \textbf{stage 1} (unit U$_1$): $\mathcal{B}_{t\bmod2} \gets \mathrm{CP\text{-}ALS}(\text{CSI}_t, R_t)$
+  \State \quad \textbf{stage 2} (unit U$_2$): pose$_{t-1} \gets$ Alg.~\ref{alg:forkjoin}$(\mathcal{B}_{(t-1)\bmod2})$
+  \State \textbf{barrier}; emit pose$_{t-1}$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Status of the claim.}
+The independence above is a structural property of the architecture and is exact. The resulting latency and energy gains, however, are \emph{not yet measured on device}: thread-launch and NPU dispatch overhead can exceed the tiny branch compute, and the pipeline win depends on the real $T_\text{CP}/T_\text{S\text{-}AFF}$ ratio. We report per-rank on-device CP and S-AFF latencies, single-lane versus fork--join S-AFF, and sequential versus pipelined throughput as part of the hardware evaluation (Sec.~\ref{sec:parallel} numbers pending calibration); we do not claim a speedup we have not timed.
+
 \section{Experimental Setup}
 
 \subsection{Dataset and Protocol}
