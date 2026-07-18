@@ -41,6 +41,8 @@ from exp17_piw3d_cp_saff import (  # noqa: E402
     pck_mm,
     query_set_loss,
     mean_pose_prediction,
+    standardize,
+    standardize_pose,
 )
 from exp19_piw3d_dualcp_saff import make_dual_model  # noqa: E402
 
@@ -130,6 +132,17 @@ def main():
     parser.add_argument("--max-test", type=int, default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--rank-sampling", choices=["uniform", "sandwich"], default="sandwich",
+                        help="uniform: one random rank per batch (old, under-trains high ranks); "
+                             "sandwich: train min+max+random-middle each batch (anytime-net standard)")
+    parser.add_argument("--distill", action="store_true",
+                        help="inplace KD: sub-ranks match the full-rank (teacher) pose output")
+    parser.add_argument("--distill-weight", type=float, default=1.0,
+                        help="weight on the KD (teacher-matching) term for sub-ranks")
+    parser.add_argument("--distill-gt-weight", type=float, default=0.5,
+                        help="weight on the ground-truth term for sub-ranks under KD")
+    parser.add_argument("--distill-warmup", type=int, default=10,
+                        help="epochs of plain GT training before KD kicks in (teacher must be usable)")
     args = parser.parse_args()
 
     torch, nn, DataLoader, TensorDataset = require_torch()
@@ -164,36 +177,79 @@ def main():
     xa_test = energy_sort_stream(xa_test, RANK_MAX)
     xp_test = energy_sort_stream(xp_test, RANK_MAX)
 
+    # Match the dedicated dual-CP training protocol from exp19: standardize
+    # both CP streams and train in standardized pose coordinates. The previous
+    # anytime run optimized raw 3D coordinates and collapsed at full rank.
+    xa_train, xa_test = standardize(xa_train, xa_test)
+    xp_train, xp_test = standardize(xp_train, xp_test)
+    y_train_s, _, y_mean, y_std = standardize_pose(y_train, y_test)
+
     device = torch.device(args.device)
     model = make_dual_model(nn, RANK_MAX, args.model_size, args.num_queries, args.query_mixer, args.gate_temperature).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     ds = TensorDataset(
         torch.from_numpy(xa_train), torch.from_numpy(xp_train),
-        torch.from_numpy(y_train), torch.from_numpy(mask_train),
+        torch.from_numpy(y_train_s.astype(np.float32)), torch.from_numpy(mask_train),
     )
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
     params = sum(p.numel() for p in model.parameters())
     print(f"model_params={params} candidate_ranks={CANDIDATE_RANKS}", flush=True)
 
     rng = np.random.RandomState(args.seed)
+    lo, hi = min(CANDIDATE_RANKS), max(CANDIDATE_RANKS)
+    mids = [r for r in CANDIDATE_RANKS if r not in (lo, hi)]
+    print(f"rank_sampling={args.rank_sampling} lo={lo} hi={hi} mids={mids}", flush=True)
     t0 = time.time()
     for epoch in range(1, args.epochs + 1):
         model.train()
         losses = []
         for xa, xp, yb, mb in loader:
             xa, xp, yb, mb = xa.to(device), xp.to(device), yb.to(device), mb.to(device)
-            r = int(rng.choice(CANDIDATE_RANKS))
-            xa_r = mask_rank_flat(xa, r, torch)
-            xp_r = mask_rank_flat(xp, r, torch)
+            if args.rank_sampling == "sandwich":
+                # Anytime-net "sandwich rule": always train the smallest and largest
+                # rank (bracket the operating range) plus one random middle rank.
+                r_set = [lo, hi] + ([int(rng.choice(mids))] if mids else [])
+            else:
+                r_set = [int(rng.choice(CANDIDATE_RANKS))]
             opt.zero_grad(set_to_none=True)
-            poses, logits, count_logits, gates = model(xa_r, xp_r, return_gates=True)
-            loss = query_set_loss(poses, logits, count_logits, yb, mb, torch,
-                                  args.cls_weight, args.count_weight, args.bone_weight, args.pose_loss)
-            if args.gate_entropy_weight > 0:
-                loss = loss + args.gate_entropy_weight * (gate_entropy(gates[:, :4]) + gate_entropy(gates[:, 4:8]))
-            loss.backward()
+            batch_loss = 0.0
+            kd_on = args.distill and epoch > args.distill_warmup
+
+            def gt_loss(poses, logits, count_logits, gates):
+                loss = query_set_loss(poses, logits, count_logits, yb, mb, torch,
+                                      args.cls_weight, args.count_weight, args.bone_weight, args.pose_loss)
+                if args.gate_entropy_weight > 0:
+                    loss = loss + args.gate_entropy_weight * (gate_entropy(gates[:, :4]) + gate_entropy(gates[:, 4:8]))
+                return loss
+
+            if kd_on:
+                # Teacher = full (hi) rank, trained on ground truth. Sub-ranks match its output.
+                xa_hi = mask_rank_flat(xa, hi, torch)
+                xp_hi = mask_rank_flat(xp, hi, torch)
+                poses_hi, logits_hi, count_hi, gates_hi = model(xa_hi, xp_hi, return_gates=True)
+                loss_hi = gt_loss(poses_hi, logits_hi, count_hi, gates_hi)
+                loss_hi.backward()
+                batch_loss += float(loss_hi.detach().cpu())
+                teacher_poses = poses_hi.detach()
+                for r in [rr for rr in r_set if rr != hi]:
+                    xa_r = mask_rank_flat(xa, r, torch)
+                    xp_r = mask_rank_flat(xp, r, torch)
+                    poses_r, logits_r, count_r, gates_r = model(xa_r, xp_r, return_gates=True)
+                    kd = torch.nn.functional.l1_loss(poses_r, teacher_poses)
+                    loss_r = args.distill_weight * kd + args.distill_gt_weight * gt_loss(
+                        poses_r, logits_r, count_r, gates_r)
+                    loss_r.backward()
+                    batch_loss += float(loss_r.detach().cpu())
+            else:
+                for r in r_set:
+                    xa_r = mask_rank_flat(xa, r, torch)
+                    xp_r = mask_rank_flat(xp, r, torch)
+                    poses, logits, count_logits, gates = model(xa_r, xp_r, return_gates=True)
+                    loss = gt_loss(poses, logits, count_logits, gates) / len(r_set)
+                    loss.backward()
+                    batch_loss += float(loss.detach().cpu())
             opt.step()
-            losses.append(float(loss.detach().cpu()))
+            losses.append(batch_loss)
         print(f"epoch={epoch} loss={np.mean(losses):.6f}", flush=True)
     train_sec = time.time() - t0
 
@@ -221,6 +277,7 @@ def main():
         score = np.vstack(scores)
         top = np.argsort(-score, axis=1)[:, :MAX_PEOPLE]
         pred_top = np.take_along_axis(pred, top[:, :, None, None], axis=1)
+        pred_top = pred_top * y_std + y_mean
         pf, _ = per_frame_mpjpe_mm(y_test, pred_top, mask_test)
         mpjpe_by_rank[:, j] = pf
         row = {

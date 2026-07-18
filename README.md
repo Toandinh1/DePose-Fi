@@ -23,11 +23,10 @@ Our main pipeline is:
 
 ## Systems Mechanisms (for co-authors)
 
-See **[`MECHANISMS.md`](MECHANISMS.md)** for a self-contained explanation of the two
-systems-level mechanisms — **Proactive Resource-Aware Rank Adaptation (PRA)** and
-**Distributed & Parallel Execution** — including the controller, the accuracy/latency
-models, when PRA actually wins, the fork–join structure of S-AFF, and the current
-results status.
+See **[`MECHANISMS.md`](MECHANISMS.md)** for candidate systems mechanisms and
+negative results. The paper-facing hardware story is now measured deployment
+cost, the isolated CP bottleneck, and deadline-aware CP-iteration runtime; PRA is
+not claimed because the anytime rank model did not preserve tuned dual-CP accuracy.
 
 ## Main Takeaway
 
@@ -262,16 +261,13 @@ Current result: the trained MM-Fi S-AFF gate selects the subcarrier expert for 1
 
 
 
-#### Proactive Rank Adaptation (formalized)
+#### Proactive Rank Adaptation (de-scoped)
 
-"Proactive Resource-Aware Rank Adaptation" formalizes it as an online control problem so it stands as a contribution rather than a threshold heuristic:
-
-- **Why CP makes it cheap:** CP ranks are *nested and additive* (rank-R = rank-(R-1) + one more rank-1 term), so SwiftPose-Fi is a single *anytime* predictor. Components are computed one at a time and inference can stop at any rank. Switching cost is near zero and the memory footprint is one model, unlike a generic model zoo that must hold and reload several networks.
-- **Control objective:** at each frame pick the most accurate rank whose *predicted* latency `L(R)/rho_hat` fits the deadline `D`, where `rho_hat` is a forecast of available CPU. Hysteresis prevents oscillation.
-- **Proactive vs reactive:** the controller acts on the forecast `rho_hat` so rank is set *before* the deadline, unlike a reactive policy that lowers rank only after a miss.
-- **Planned evaluation:** drive the estimator with time-varying CPU contention and compare fixed-R2, fixed-R8, reactive, proactive, and an oracle upper bound on deadline-miss rate, delivered PCK20, and switch count.
-
-Remaining work to promote this from mechanism to measured result: (1) train true R=2/6/8 accuracies to replace the placeholders, and (2) run the contention comparison above.
+PRA was tested but is not paper-ready. On Person-in-WiFi 3D, the tuned dedicated
+dual-CP model reaches 83.82 mm MPJPE, but the best standardized anytime rank model
+after 160 epochs reaches only 121.05 mm at full rank and has a non-monotonic rank
+ladder. We keep rank adaptation as a negative result / future-work direction, not
+as a claimed contribution.
 
 ### Decomposition Feature Comparison
 
@@ -303,7 +299,7 @@ Current full-MM-Fi result:
 - Query-style heads are necessary for multi-person Person-in-WiFi 3D.
 - Separate amplitude/phase CP streams improve Person-in-WiFi 3D single-person accuracy.
 - S-AFF exposes branch-level parallelism, but the first Python-thread benchmark shows no batch-1 latency gain yet.
-- CP rank enables proactive resource-aware deployment: the runtime can select R=4 under heavy CPU load and R=8 when more CPU is available.
+- CP rank is a useful static deployment profile knob, but runtime rank adaptation is de-scoped until an anytime model preserves dedicated accuracy.
 
 ### Did Not Work Well Yet
 
@@ -312,6 +308,7 @@ Current full-MM-Fi result:
 - Combined amplitude+phase CP is weaker than separate amplitude/phase CP streams.
 - PiW multi-person accuracy is still not competitive with heavy SOTA models.
 - Naive Python-thread branch parallelism is slower than sequential S-AFF for batch-1 CPU inference.
+- Proactive rank adaptation failed the current paper bar: standardized dual-CP anytime training improved full-rank PiW MPJPE to 121.05 mm, but that is still far from the dedicated 83.82 mm model and the rank ladder is not monotonic.
 
 ## Paper Draft
 
@@ -327,7 +324,7 @@ Current framing:
 - Person-in-WiFi 3D is a generalization/stress-test setting.
 - We should not claim SOTA on PiW yet.
 - The PiW lesson is that separate amplitude/phase CP streams are required for stronger 3D performance.
-- The new systems contribution is resource-aware rank/profile selection: adapt CP rank to current hardware availability instead of deploying one fixed model.
+- The systems contribution should focus on measured deployment cost, the isolated CP bottleneck, and deadline-aware CP-iteration runtime; runtime rank adaptation is future work.
 
 ## Git Hygiene
 

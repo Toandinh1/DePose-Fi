@@ -20,7 +20,7 @@ TODO: email}
 \maketitle
 
 \begin{abstract}
-Wi-Fi human pose estimation (HPE) enables camera-free sensing, but current Wi-Fi HPE systems remain difficult to deploy on tiny edge devices because they feed entangled channel state information (CSI) into neural networks and rely on the model to internally discover pose-relevant structure. This paper argues that practical Wi-Fi HPE requires a different system abstraction: first decompose CSI into physically meaningful components, then use a small hardware-friendly model to selectively fuse those components. We present \method, a decomposition-guided Wi-Fi HPE system for fast inference on edge devices. \method\ factorizes each CSI frame into link, subcarrier, and packet factors using non-negative CP decomposition, and estimates pose using selective component-adaptive fusion (S-AFF). CP exposes interpretable wireless components, while S-AFF provides a compact deployable neural predictor that chooses, per sample, whether pose should be predicted from one dominant component or from a fused component representation. A sharpening loss encourages decisive sparse gates rather than uninformative near-uniform averaging. On the full MM-Fi protocol-3 frame-level split with 320,760 CSI frames, CP+S-AFF achieves 50.80\% PCK$_{20}$ with only 64.9K parameters and about 2.89M FLOPs per frame. Compared with HPE-Li, a strong lightweight Wi-Fi HPE baseline with 1.66M parameters and 2.42G FLOPs, CP+S-AFF reduces parameters by 26$\times$ and FLOPs by more than 838$\times$ while remaining within 1.27 PCK$_{20}$ points. We further adapt the decomposition principle to Person-in-WiFi 3D by using a lightweight query S-AFF head and, for the single-person setting, separate amplitude and phase CP streams. On true single-person Person-in-WiFi 3D, dual-stream CP+S-AFF reaches 83.82 mm MPJPE with 1.70M parameters, outperforming the original 48.2M-parameter Person-in-WiFi 3D baseline but still trailing the recent 2.14M-parameter WiFi-Mamba result; a 923K-parameter profile approximately matches the original Person-in-WiFi 3D baseline with 52.2$\times$ fewer parameters. Component ablation shows that removing one decomposed component causes up to an 18.94-point PCK$_{20}$ drop, and removing the subcarrier factor causes a 24.90-point drop. These results show that decomposition is not merely compression: it exposes pose-relevant CSI structure and creates a hardware-friendly bridge from Wi-Fi HPE algorithms to real edge deployment.
+Wi-Fi human pose estimation (HPE) enables camera-free sensing, but current Wi-Fi HPE systems remain difficult to deploy on tiny edge devices because they feed entangled channel state information (CSI) into neural networks and rely on the model to internally discover pose-relevant structure. This paper argues that practical Wi-Fi HPE requires a different system abstraction: first decompose CSI into physically meaningful components, then use a small hardware-friendly model to selectively fuse those components. We present \method, a decomposition-guided Wi-Fi HPE system for fast inference on edge devices. \method\ factorizes each CSI frame into link, subcarrier, and packet factors using non-negative CP decomposition, and estimates pose using selective component-adaptive fusion (S-AFF). CP exposes interpretable wireless components, while S-AFF provides a compact deployable neural predictor that chooses, per sample, whether pose should be predicted from one dominant component or from a fused component representation. A sharpening loss encourages decisive sparse gates rather than uninformative near-uniform averaging. On the full MM-Fi protocol-3 frame-level split with 320,760 CSI frames, CP+S-AFF achieves 50.80\% PCK$_{20}$ with only 64.9K parameters and about 2.89M FLOPs per frame. Compared with HPE-Li, a strong lightweight Wi-Fi HPE baseline with 1.66M parameters and 2.42G FLOPs, CP+S-AFF reduces parameters by 26$\times$ and FLOPs by more than 838$\times$ while remaining within 1.27 PCK$_{20}$ points. We further adapt the decomposition principle to Person-in-WiFi 3D by using a lightweight query S-AFF head and, for the single-person setting, separate amplitude and phase CP streams. On true single-person Person-in-WiFi 3D, dual-stream CP+S-AFF reaches 83.82 mm MPJPE with 1.70M parameters, outperforming the original 48.2M-parameter Person-in-WiFi 3D baseline but still trailing the recent 2.14M-parameter WiFi-Mamba result; a 923K-parameter profile approximately matches the original Person-in-WiFi 3D baseline with 52.2$\times$ fewer parameters. Component ablation shows that removing one decomposed component causes up to an 18.94-point PCK$_{20}$ drop, and removing the subcarrier factor causes a 24.90-point drop. Beyond size, the learned predictor is one to two orders of magnitude cheaper than the decomposition itself, so the pipeline reaches real-time frame rates on a single CPU core without multithreading or a GPU. These results show that decomposition is not merely compression: it exposes pose-relevant CSI structure and creates a hardware-friendly bridge from Wi-Fi HPE algorithms to real edge deployment.
 \end{abstract}
 
 \section{Introduction}
@@ -42,7 +42,8 @@ This paper makes the following contributions:
     \item We design selective component-adaptive fusion (S-AFF), a tiny neural predictor that preserves single-factor experts, includes a fused-factor expert, and uses a sharpened per-sample gate to route each input.
     \item We evaluate on the full MM-Fi protocol-3 frame-level split using the HPE-Li PCK metric and add a cross-dataset adaptation study on Person-in-WiFi 3D.
     \item We show that CP+S-AFF reduces parameters by 26$\times$ and FLOPs by more than 838$\times$ compared with HPE-Li while staying within 1.27 PCK$_{20}$ points.
-    \item We analyze deployment friendliness through operator portability, model size, latency bottlenecks, and controllable CP rank/iteration knobs.
+    \item We analyze deployment friendliness through operator portability, model size, measured latency bottlenecks, and controllable CP iteration budgets.
+    \item We show that at this scale single-core sequential inference is already real time, and that the dominant deployment cost is the isolated CP extraction kernel rather than the S-AFF head.
     \item We provide component and factor-mode ablations showing that decomposed factors carry pose-relevant information.
 \end{itemize}
 
@@ -136,6 +137,22 @@ ExtraTrees performs well in our experiments, but it is not the target deployment
 \caption{Overview of \method. Raw CSI is decomposed into link, subcarrier, and packet factors, then fused by a tiny component-adaptive predictor for pose estimation.}
 \label{fig:overview}
 \end{figure*}
+
+\section{Architectural Insight: Capacity as a Runtime-Addressable Representation}
+\label{sec:insight}
+
+Most efficient-HPE work shrinks a network: fewer layers, narrower channels, quantized weights. \method\ rests on a different and, we argue, more useful observation for edge sensing: \emph{decomposition-first inference separates the expensive signal-organization kernel from the learned pose predictor.} The deployment question is no longer a black-box neural-network compression problem; it becomes a measured pipeline problem with a tiny portable head and one isolated factorization bottleneck. Three consequences follow, and they---not raw parameter count---are what make the system deployable on tiny hardware.
+
+\textbf{(1) The learned predictor becomes tiny and portable.}
+S-AFF consumes compact CP factors using dense layers, one-dimensional convolutions, pooling, and softmax gates. These are standard neural operators supported by ONNX Runtime, TorchScript, TensorRT, and CPU vector libraries. The deployable head is therefore small, regular, and easy to export, unlike large direct-HPE backbones or branch-heavy tree ensembles.
+
+\textbf{(2) The learned cost is isolated and predictable.}
+Because signal organization is factored out of the network, the \emph{learned} predictor is tiny and the \emph{fixed} decomposition dominates cost. On a development-workstation single core we measure the S-AFF forward pass at $\approx0.04$\,ms per frame versus $\approx0.5$--$13$\,ms for CP-ALS across rank $2$--$8$ and $5$--$35$ iterations---a $27$--$350\times$ gap (Sec.~\ref{sec:parallel}). The system's compute profile thus collapses onto a \emph{single analyzable kernel} whose cost is linear and predictable in rank and iterations. Predictable compute is a systems virtue in itself, and it tells us exactly where to optimize: warm-started or amortized (learned feed-forward) factor extraction, not the neural head.
+
+\textbf{(3) Independence does not need parallelism to be useful.}
+The mode-specialized branches share no weights or activations and are formally parallel, but at this scale that independence does \emph{not} translate into a wall-clock win: single-core sequential inference is already real time, fork--join overhead exceeds the sub-millisecond branch compute, and BLAS multithreading does not shrink either stage on these small tensors (Sec.~\ref{sec:parallel}). Claiming ``we run in parallel, therefore we are fast'' would be false here; claiming ``we need neither a GPU, nor threads, nor a second core to hit real time'' is both true and a stronger deployability statement.
+
+Together these give the paper's organizing principle: in decomposition-first sensing, \emph{representation design determines deployment cost}. The neural head is already cheap; the remaining hardware problem is the CP kernel, whose rank and iteration count provide measurable latency knobs.
 
 \section{CSI Decomposition}
 
@@ -292,7 +309,7 @@ The S-AFF training objective is:
 \mathcal{L}
 =
 \mathcal{L}_{pose}
-\lambda_{sharp}\mathcal{L}_{sharp}.
++\lambda_{sharp}\mathcal{L}_{sharp}.
 \end{equation}
 This loss encourages decisive gates, but it does not hard-code which branch should win. The winning branch is still learned from data. In our full-MM-Fi experiment, the learned gate chooses the subcarrier expert for 46.0\% of test frames and the fused expert for 54.0\%, with negligible probability assigned to link-only or packet-only experts. This matches the factor ablation: subcarrier structure is dominant in the single-frame protocol, but a fused representation is still useful for many frames.
 
@@ -334,7 +351,7 @@ S-AFF is composed of standard neural operators: linear layers, 1D convolutions, 
 \subsection{Distributed and Parallel Execution}
 \label{sec:parallel}
 
-A useful property of the decomposition-guided design is that the predictor is a \emph{fork--join} dataflow rather than a monolithic network, so parts of it map naturally onto parallel or heterogeneous hardware. We make this explicit and, importantly, bound how much it can help so the systems claim stays honest.
+The independence of the mode-specialized branches invites a parallel implementation, but we lead with the honest measured conclusion: \emph{at this model scale, parallelism is not where the win is.} On a development-workstation single core, a sequential pass over CP+S-AFF is already real time, and the learned predictor is one to two orders of magnitude cheaper than decomposition: the S-AFF forward pass measures $\approx0.04$\,ms per frame, versus $\approx0.5$--$13$\,ms for CP-ALS across rank $2$--$8$ at $5$--$35$ iterations, and BLAS multithreading reduces neither at these tensor sizes. Consistent with this, an on-device fork--join of the encoder branches ran \emph{slower} than the single-thread sequential path ($0.70\times$). We therefore treat the fork--join structure below as a \emph{latent} property that becomes useful only if CP is separately accelerated, and we bound its benefit rather than claim it.
 
 \textbf{Where the independence actually is.}
 After CP produces the three factor matrices $A\in\mathbb{R}^{L\times R}$, $B\in\mathbb{R}^{S\times R}$, $C\in\mathbb{R}^{P\times R}$, the three mode-specialized encoders read \emph{disjoint} slices of the factor vector and share no weights or activations. Their outputs $f_A=g_A(A)$, $f_B=g_B(B)$, $f_C=g_C(C)$ are therefore data-independent and can be computed concurrently on three lanes. All coupling is deferred to a single join point: the fused expert $f_F=\mathrm{fuse}([f_A,f_B,f_C])$, the gate $\alpha=\mathrm{softmax}(W_g[f_A,f_B,f_C]/\tau)$, the gated combination $b=\sum_m \alpha_m\, \mathrm{proj}_m$, and the query decoder all execute after a barrier. This is a map (three branches) followed by a reduce (fuse/gate/decode), not a set of independent end-to-end pipelines.
@@ -343,7 +360,7 @@ After CP produces the three factor matrices $A\in\mathbb{R}^{L\times R}$, $B\in\
 Let $w_A,w_B,w_C$ be the per-frame cost of the three encoders and $w_J$ the cost of the joined fuse/gate/decode stage. Sequential execution costs $T_\text{seq}=w_A+w_B+w_C+w_J$; ideal three-lane execution costs $T_\text{par}=\max(w_A,w_B,w_C)+w_J$. The attainable speedup of the S-AFF stage is thus bounded by $(w_A+w_B+w_C)/\max(w_A,w_B,w_C)\le 3$, and in practice is smaller because the subcarrier branch (two 1D-convolution blocks) dominates $w_B\gg w_A,w_C$; the link and packet branches are shallow dense/1D-conv maps. Branch parallelism is therefore a modest constant-factor win \emph{on the S-AFF stage only}.
 
 \textbf{The stage that dominates is CP, so pipelining is the stronger lever.}
-The per-frame cost is $T_\text{CP}+T_\text{S\text{-}AFF}$, and $T_\text{CP}$ (iterative ALS) dominates $T_\text{S\text{-}AFF}$. Because the two stages are sequential \emph{within} a frame but independent \emph{across} frames, we double-buffer them: while stage~1 factorizes frame $t{+}1$, stage~2 runs S-AFF on frame $t$ (Alg.~\ref{alg:pipeline}). Steady-state throughput becomes $1/\max(T_\text{CP},T_\text{S\text{-}AFF})$ instead of $1/(T_\text{CP}+T_\text{S\text{-}AFF})$. Since $T_\text{CP}\gg T_\text{S\text{-}AFF}$, S-AFF is almost fully hidden behind the next frame's factorization: the correct conclusion is that intra-S-AFF branch parallelism matters little \emph{unless} CP is separately accelerated or offloaded, at which point S-AFF re-enters the critical path and Alg.~\ref{alg:forkjoin} becomes worthwhile. The rank $R$ selected by the runtime rank-adaptation controller sets both $T_\text{CP}$ and the branch input width, so it also controls the pipeline balance.
+The per-frame cost is $T_\text{CP}+T_\text{S\text{-}AFF}$, and $T_\text{CP}$ (iterative ALS) dominates $T_\text{S\text{-}AFF}$. Because the two stages are sequential \emph{within} a frame but independent \emph{across} frames, we double-buffer them: while stage~1 factorizes frame $t{+}1$, stage~2 runs S-AFF on frame $t$ (Alg.~\ref{alg:pipeline}). Steady-state throughput becomes $1/\max(T_\text{CP},T_\text{S\text{-}AFF})$ instead of $1/(T_\text{CP}+T_\text{S\text{-}AFF})$. Since $T_\text{CP}\gg T_\text{S\text{-}AFF}$, S-AFF is almost fully hidden behind the next frame's factorization: the correct conclusion is that intra-S-AFF branch parallelism matters little \emph{unless} CP is separately accelerated or offloaded, at which point S-AFF re-enters the critical path and Alg.~\ref{alg:forkjoin} becomes worthwhile. In this draft we use fixed rank profiles and adapt the CP iteration budget, not runtime rank switching.
 
 \textbf{Heterogeneous mapping and data parallelism.}
 The conv-heavy subcarrier branch maps well to an NPU/DSP while the dense link and packet branches run on CPU, allowing the branches to overlap on distinct units at no extra energy. Within CP, the matricized tensor-times-Khatri-Rao products are data-parallel across the $R$ components and across the three physical links (a $3\times3$ antenna array in Person-in-WiFi~3D), and the $Q$ person queries in the decoder are already a batched matmul with coupling confined to one small attention mixer.
@@ -366,14 +383,14 @@ The conv-heavy subcarrier branch maps well to an NPU/DSP while the dense link an
 \end{algorithm}
 
 \begin{algorithm}[t]
-\caption{Pipelined streaming with rank adaptation}
+\caption{Pipelined streaming with fixed rank profile}
 \label{alg:pipeline}
 \begin{algorithmic}[1]
 \State double buffer $\mathcal{B}_0,\mathcal{B}_1$ for factor outputs
 \For{each frame $t$}
-  \State $R_t \gets \textsc{SelectRank}(\hat{\rho}_t, D)$ \Comment{proactive controller}
+  \State $R \gets$ configured deployment profile; $I_t \gets$ iteration budget
   \State \textbf{concurrently}:
-  \State \quad \textbf{stage 1} (unit U$_1$): $\mathcal{B}_{t\bmod2} \gets \mathrm{CP\text{-}ALS}(\text{CSI}_t, R_t)$
+  \State \quad \textbf{stage 1} (unit U$_1$): $\mathcal{B}_{t\bmod2} \gets \mathrm{CP\text{-}ALS}(\text{CSI}_t, R, I_t)$
   \State \quad \textbf{stage 2} (unit U$_2$): pose$_{t-1} \gets$ Alg.~\ref{alg:forkjoin}$(\mathcal{B}_{(t-1)\bmod2})$
   \State \textbf{barrier}; emit pose$_{t-1}$
 \EndFor
@@ -381,7 +398,7 @@ The conv-heavy subcarrier branch maps well to an NPU/DSP while the dense link an
 \end{algorithm}
 
 \textbf{Status of the claim.}
-The independence above is a structural property of the architecture and is exact. The resulting latency and energy gains, however, are \emph{not yet measured on device}: thread-launch and NPU dispatch overhead can exceed the tiny branch compute, and the pipeline win depends on the real $T_\text{CP}/T_\text{S\text{-}AFF}$ ratio. We report per-rank on-device CP and S-AFF latencies, single-lane versus fork--join S-AFF, and sequential versus pipelined throughput as part of the hardware evaluation (Sec.~\ref{sec:parallel} numbers pending calibration); we do not claim a speedup we have not timed.
+The independence above is a structural property of the architecture and is exact. We have measured its consequences on a Qualcomm aarch64 edge device (six cores, \texttt{5.4.233-perf} kernel) and they confirm the honest reading. A fork--join of the ONNX encoder branches is \emph{slower} than the single-thread sequential path ($0.70\times$). The S-AFF ONNX head runs in $0.18$--$0.75$\,ms single-thread and is \emph{slower} with six threads ($0.26$--$1.08$\,ms). CP-ALS thread scaling is null: six-thread extraction matches single-thread within measurement noise (Table~\ref{tab:ondevice}). Coarse-grain concurrency of the two independent CP streams (amplitude and phase) also fails: Python thread execution collapses under the GIL to $0.05\times$, and even persistent multiprocess workers reach only $0.85\times$, because the inter-process round-trip ($\sim$6.6\,ms for two jobs) is comparable to the $\sim$7\,ms per-stream compute. Across every granularity we tested---sub-millisecond neural branches and millisecond-scale CP streams---the parallelization overhead meets or exceeds the per-task work. We therefore do not claim a parallel speedup, because at batch~1 on this hardware there is none to claim; the deployable result is that a single core is already sufficient, and the fork--join/pipeline structure is a reserve lever for the case where CP is offloaded to a DSP/NPU.
 
 \section{Experimental Setup}
 
@@ -706,71 +723,79 @@ SwiftPose-Fi-XL & 8 & 10--15 & Highest & Unloaded edge \\
 \end{tabular}
 \end{table}
 
-The current experiments evaluate the middle profile, SwiftPose-Fi-M, because it balances accuracy and cost. To test whether this knob can support proactive hardware adaptation, we simulate a resource-aware selector. The selector observes available CPU fraction and chooses the highest-accuracy rank profile satisfying a 20 ms frame-latency budget. ONNX latency is measured for rank-specific S-AFF graphs on CPU; CP latency is estimated from the measured rank-4 CP extraction cost and scaled linearly with rank. The PCK$_{20}$ values for ranks 2, 6, and 8 are profile assumptions until those exact ranks are fully trained, while rank 4 is anchored to the measured CP+S-AFF result.
+The current experiments evaluate the middle profile, SwiftPose-Fi-M, because it balances accuracy and cost. The profiles are useful deployment targets, but we do not claim a validated runtime rank selector in this draft: a nested-anytime rank model reduced Person-in-WiFi 3D accuracy too much relative to the dedicated dual-CP model (Sec.~\ref{sec:rank_negative}). We therefore keep rank as a static deployment profile and focus the hardware contribution on measured latency and deadline-aware CP iteration preemption.
+
+\subsection{On-Device Cost Structure (Qualcomm aarch64)}
+\label{sec:ondevice}
+
+We measured the two pipeline stages on a Qualcomm aarch64 edge device (six cores, \texttt{5.4.233-perf} kernel, Python~3.8.10) at batch~1, the frame-level deployment regime. Table~\ref{tab:ondevice} reports per-frame CP-ALS latency across rank and iteration count on a single core. Three facts stand out. First, CP-ALS latency is monotone and near-linear in both rank and iterations, so both are clean runtime latency dials: the rank-4/10-iteration MM-Fi profile costs $2.24$\,ms (about $446$ frames/s for extraction alone), and the rank-24/10-iteration profile used for dual-stream Person-in-WiFi~3D costs $7.44$\,ms per stream. Second, the S-AFF predictor is negligible beside it: the exported dual-CP S-AFF ONNX graph runs in $0.18$--$0.75$\,ms single-thread across the small/medium/large profiles, one to two orders of magnitude below CP, so CP is more than $90\%$ of end-to-end latency and is the only kernel worth optimizing. Third, thread scaling is null: six-thread CP-ALS matches single-thread within measurement noise, and the S-AFF ONNX head is actually \emph{slower} with six threads ($0.26$--$1.08$\,ms) than with one. On this device, a single core running sequentially is both the simplest and the fastest option at batch~1, which is why the validated runtime lever is deadline-aware CP iteration preemption rather than multicore parallelism.
 
 \begin{table}[t]
 \centering
-\caption{Resource-aware rank selection simulation with a 20 ms latency budget. CPU availability scales effective latency as $\ell/\rho$, where $\rho$ is the available CPU fraction.}
-\label{tab:resource_rank}
-\begin{tabular}{lrrrr}
+\caption{Measured per-frame CP-ALS latency on the Qualcomm aarch64 device (single core, batch~1, median ms). Six-thread results match single-thread within noise.}
+\label{tab:ondevice}
+\begin{tabular}{lrrr}
 \toprule
-CPU available & Selected rank & Effective latency & FPS & Assumed PCK$_{20}$ \\
+Rank $R$ & 5 iters & 10 iters & 35 iters \\
 \midrule
-20\% & 4 & 18.02 ms & 55.49 & 50.80 \\
-40\% & 8 & 17.50 ms & 57.14 & 52.10 \\
-80\% & 8 & 8.75 ms & 114.29 & 52.10 \\
+2  & 0.90 & 1.60 & 5.08 \\
+4  & 1.22 & 2.24 & 7.33 \\
+6  & 1.41 & 2.61 & 8.59 \\
+8  & 1.73 & 3.26 & 10.80 \\
+16 & 2.80 & 5.38 & 18.11 \\
+24 & 3.84 & 7.44 & 25.30 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:resource_rank} shows why CP rank is a useful systems knob. When the CPU is heavily loaded, the selector drops to rank 4 to stay within the latency budget. When more CPU is available, it chooses rank 8 for higher assumed accuracy. The important claim is not that these assumed rank accuracies are final; it is that SwiftPose-Fi exposes a measurable and controllable rank-latency trade-off that can be used by a runtime scheduler.
+\subsection{Why We Do Not Claim Runtime Rank Adaptation}
+\label{sec:rank_negative}
 
-\subsection{Proactive Resource-Aware Rank Adaptation}
-\label{sec:proactive}
+CP rank is an attractive deployment knob because latency grows monotonically with rank (Table~\ref{tab:ondevice}). We tested whether this could become a single-model runtime controller by training a nested-anytime dual-CP model that accepts rank prefixes. The result was not strong enough for the paper: after fixing the training protocol and running a 160-epoch sandwich-rule model on Person-in-WiFi~3D, the full-rank prefix reached only 121.05\,mm MPJPE, substantially worse than the dedicated rank-24 dual-CP model's 83.82\,mm, and the rank ladder was not monotonic (120.58/125.40/126.06/121.05\,mm for ranks 4/8/16/24). We therefore de-scope proactive rank adaptation from the claimed contribution. Rank remains useful for choosing a static deployment profile, but the validated runtime mechanism below adapts CP \emph{iterations} while preserving the dedicated model.
 
-The selector above is a static lookup: given a CPU reading, return a rank. This section formalizes the mechanism as an online control problem and explains why it is a contribution rather than a threshold table. Edge sensing gateways rarely run a pose estimator in isolation; they share a CPU with networking, logging, and other sensing tasks, so the compute available to the estimator varies over time. A fixed rank is therefore the wrong abstraction: a high rank misses frame deadlines under contention, while a low rank wastes capacity when the device is idle. \method\ instead treats CP rank as a runtime-controlled variable and adapts it \emph{proactively} to the predicted compute budget.
+\subsection{Deadline-Preemptible Anytime Runtime}
+\label{sec:preempt}
 
-\textbf{Why decomposition makes this cheap.}
-A generic ``model zoo'' can also switch between fast and slow models, but it must hold several independent networks in memory and pay a load or context-switch cost to change models. CP rank is fundamentally different because the ranks are \emph{nested and additive}. A rank-$R$ reconstruction is exactly the rank-$(R{-}1)$ reconstruction plus one additional rank-1 term,
-\begin{equation}
-\hat{\mathcal{X}}_R = \sum_{r=1}^{R} \lambda_r\, \mathbf{a}_r \circ \mathbf{b}_r \circ \mathbf{c}_r = \hat{\mathcal{X}}_{R-1} + \lambda_R\, \mathbf{a}_R \circ \mathbf{b}_R \circ \mathbf{c}_R,
-\end{equation}
-and the S-AFF experts already operate per component. This yields a single \emph{anytime} predictor: components are computed one at a time and evaluation can terminate at any $R$, so switching cost is near zero, memory footprint is a single model, and a mid-frame budget shock can be absorbed by stopping early rather than dropping the frame. This monotone quality ladder is a property of the decomposition, not an engineering add-on, and it is what separates \method\ from slimmable or early-exit networks that require purpose-built multi-width training.
+We adapt at a finer, retraining-free granularity. The CP-MU solver is itself an anytime algorithm over its \emph{iterations}: every multiplicative-update sweep yields valid factors, so the loop can be stopped at any point. We therefore run the \emph{dedicated} full-accuracy model and preempt only its CP iteration count to meet a latency deadline, leaving CP and S-AFF otherwise unchanged.
 
-\textbf{Control objective.}
-Let $D$ be the per-frame latency deadline and $\rho_t \in (0,1]$ the fraction of one core available to the estimator during frame $t$. The effective latency of rank $R$ is modeled as $L(R)/\rho_t$, where $L(R)$ is the measured single-core latency and $A(R)$ the measured accuracy at rank $R$. Because $\rho_t$ is not known until the frame runs, we forecast it as $\hat{\rho}_t$ from recent history. At each frame the controller solves
-\begin{equation}
-R_t^{\star} = \arg\max_{R \in \{2,4,6,8\}} A(R) \quad \text{s.t.} \quad \frac{L(R)}{\hat{\rho}_t} \le D,
-\label{eq:proactive}
-\end{equation}
-choosing the most accurate rank whose predicted latency fits the deadline. To avoid oscillation near a boundary, a switch is committed only if the candidate strictly dominates the current rank by a hysteresis margin $\delta$. Algorithm~\ref{alg:proactive} gives the full procedure; the word \emph{proactive} refers to acting on the forecast $\hat{\rho}_t$ so the rank is set \emph{before} the deadline, in contrast to a reactive policy that lowers rank only after a miss is observed.
+The runtime executes on one core (justified by Sec.~\ref{sec:parallel}). For each frame it reserves headroom for the S-AFF head, splits the remaining budget across the amplitude and phase CP streams, and stops each stream's ALS loop \emph{predictively}---before any sweep whose estimated duration (from the previous sweep) would overshoot the budget (Algorithm~\ref{alg:preempt}).
 
 \begin{algorithm}[t]
-\caption{Proactive resource-aware rank control}
-\label{alg:proactive}
+\caption{Deadline-preemptible anytime frame inference}
+\label{alg:preempt}
 \begin{algorithmic}[1]
-\Require latency model $L(\cdot)$, accuracy model $A(\cdot)$, deadline $D$, hysteresis $\delta$, smoothing $\alpha$
-\State $\hat{\rho} \gets 1$;\ \ $R \gets 4$ \Comment{initialize budget estimate and rank}
-\For{each frame $t$ with CSI tensor $\mathcal{X}_t$}
-  \State $\hat{\rho} \gets \alpha\,\rho_{t-1} + (1-\alpha)\,\hat{\rho}$ \Comment{proactive budget forecast (EWMA)}
-  \State $\mathcal{F} \gets \{\, R' : L(R')/\hat{\rho} \le D \,\}$ \Comment{feasible ranks}
-  \State $R^{\star} \gets \max \mathcal{F}$ \textbf{if} $\mathcal{F} \ne \emptyset$ \textbf{else} $\min$ rank
-  \If{$A(R^{\star}) > A(R) + \delta$ \textbf{or} $L(R)/\hat{\rho} > D$}
-    \State $R \gets R^{\star}$ \Comment{commit switch only past hysteresis}
-  \EndIf
-  \State incrementally compute CP components $1..R$ of $\mathcal{X}_t$
-  \State \textbf{if} deadline exceeded mid-frame \textbf{then} stop at current $R$ \Comment{anytime}
-  \State predict pose with S-AFF over available components
-  \State observe realized $\rho_t$
+\Require deadline $D$, measured ONNX head cost $\hat{o}$, margin $m$, max iters $I$
+\State $t_0 \gets \mathrm{now}$;\quad $B \gets D - \hat{o} - mD$ \Comment{CP budget after head reservation}
+\For{stream $s \in \{\text{amp},\text{phase}\}$}
+  \State $t_\text{stop} \gets t_0 + w_s B$ \Comment{split budget across the two streams}
+  \State run CP-MU sweeps up to $I$; \textbf{before} each sweep, \textbf{if} $\mathrm{now}+\hat{\Delta} \ge t_\text{stop}$ \textbf{then stop} \Comment{$\hat{\Delta}$: last sweep time}
 \EndFor
+\State $\hat{y} \gets \mathrm{S\text{-}AFF}_\text{ONNX}(\text{factors}_\text{amp},\text{factors}_\text{phase})$
+\State \Return $\hat{y}$
 \end{algorithmic}
 \end{algorithm}
 
-\textbf{Evaluation design.}
-Establishing this as a contribution requires showing the controller beats obvious alternatives under time-varying load, not just that a lookup table exists. We plan to drive the estimator with realistic CPU contention traces (synthetic bursts plus a co-running background workload) and compare five policies: fixed low rank ($R{=}2$), fixed high rank ($R{=}8$), a reactive controller that lowers rank one step after each deadline miss, our proactive controller (Algorithm~\ref{alg:proactive}), and an oracle with perfect knowledge of $\rho_t$ as an upper bound. Reported metrics are deadline-miss rate, mean delivered PCK$_{20}$, number of rank switches, and accuracy delivered under budget. The target result is that the proactive controller approaches the oracle while both fixed baselines fail on one axis each: fixed high rank misses deadlines under contention and fixed low rank forfeits accuracy when the device is idle.
+\begin{table}[t]
+\centering
+\caption{On-device deadline-preemptible runtime (Qualcomm aarch64, dual-CP rank~24 + real S-AFF ONNX head, $D=35$\,ms, 50 frames/policy, single core). Iterations are the amp+phase total. ``Loaded'' runs three background CPU burners.}
+\label{tab:preempt}
+\begin{tabular}{llrrr}
+\toprule
+Condition & Policy & Median (ms) & Miss \% & Iters \\
+\midrule
+Idle   & fixed-hi (35) & 46.5 & 100 & 70.0 \\
+Idle   & fixed-lo (8)  & 12.2 & 0   & 16.0 \\
+Idle   & \textbf{preemptive} & 29.9 & \textbf{0} & \textbf{43.7} \\
+Loaded & fixed-hi (35) & 51.6 & 100 & 70.0 \\
+Loaded & fixed-lo (8)  & 13.3 & 0   & 16.0 \\
+Loaded & \textbf{preemptive} & 29.6 & \textbf{0} & \textbf{39.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\textbf{Current status.}
-The controller and the nested anytime execution path are the algorithmic contribution; their accuracy models $A(R)$ require the true rank-$\{2,6,8\}$ CP+S-AFF accuracies, which are the placeholder values in Table~\ref{tab:resource_rank}. Replacing those placeholders with measured accuracies and running the contention comparison above is the remaining work needed to promote this section from mechanism to measured result. We deliberately do not claim proactive adaptation is validated until that experiment is complete.
+Table~\ref{tab:preempt} reports the measured behavior on the device with the real \texttt{dual\_saff\_full} ONNX head, a 35\,ms deadline, under idle and real background CPU load. A fixed high iteration count gives the most refinement but misses the deadline on every frame; a fixed low count meets the deadline but wastes two-thirds of the budget; the preemptive runtime meets the deadline on every frame while delivering $2.4$--$2.7\times$ more iterations than the fixed-low policy, and it \emph{adapts down} under contention ($43.7\to39.0$ total iterations) to preserve the deadline.
+
+\textbf{What is and is not yet established.} This validates the runtime's \emph{timing} behavior---hard deadline adherence with maximal in-budget refinement---on real hardware, single core, with no retraining and CP/S-AFF unchanged. It does not by itself establish that fewer iterations preserve pose \emph{accuracy}; that requires the dedicated model's MPJPE at CP iterations $\{3,5,10,20,35\}$, which is the pending measurement. The design premise is that the dedicated model, evaluated at the $\sim$20 iterations/stream the runtime delivers within 35\,ms, remains near its 88\,mm operating point; if instead accuracy degrades sharply below full iterations, preemption trades accuracy like rank adaptation does, and we will report that outcome honestly.
 
 \subsection{Hardware Experiment Design}
 

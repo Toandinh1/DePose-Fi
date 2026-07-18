@@ -1,0 +1,24 @@
+% ============================================================================
+% PRA status note -- do NOT splice as a paper contribution.
+% ============================================================================
+%
+% Decision on 2026-07-18:
+% Proactive Resource-Aware Rank Adaptation (PRA) is de-scoped from the current
+% paper draft.
+%
+% Why:
+% - The paper headline PiW model is the dedicated dual-CP S-CAF model:
+%     R=24 -> 83.82 mm MPJPE.
+% - The anytime-rank dual-CP salvage did not preserve that accuracy:
+%     old raw-target run                 R=24 -> 441.04 mm
+%     sandwich run                       R=24 -> 188.38 mm
+%     standardized 80-epoch run          R=24 -> 137.33 mm
+%     standardized 160-epoch run   R=4/8/16/24 -> 120.58 / 125.40 / 126.06 / 121.05 mm
+% - The final rank ladder is non-monotonic and still far from the dedicated model.
+%
+% Paper-safe replacement:
+% - Keep CP rank as a static deployment-profile knob.
+% - Focus the hardware section on measured model size/FLOPs/ONNX latency,
+%   the isolated CP bottleneck, and deadline-aware CP-iteration preemption.
+% - Mention PRA only as future work or a negative result unless a stronger
+%   anytime model recovers dedicated accuracy.
